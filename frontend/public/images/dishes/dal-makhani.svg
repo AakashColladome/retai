@@ -1,29 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 420" width="600" height="420">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 240">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#451a03"/>
-      <stop offset="100%" stop-color="#b45309"/>
-    </linearGradient>
-    <radialGradient id="plate" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#fde68a" stop-opacity="0.35"/>
-      <stop offset="70%" stop-color="#ffffff" stop-opacity="0.12"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.3"/>
+    <radialGradient id="sh" cx="50%" cy="55%" r="45%">
+      <stop offset="0%" stop-color="#000" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="dal" cx="45%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#92400E"/>
+      <stop offset="70%" stop-color="#451A03"/>
+      <stop offset="100%" stop-color="#271001"/>
     </radialGradient>
   </defs>
-  <rect width="600" height="420" fill="url(#bg)"/>
-  <circle cx="480" cy="80" r="140" fill="rgba(255,255,255,0.05)"/>
-  <circle cx="110" cy="350" r="160" fill="rgba(0,0,0,0.18)"/>
-  <!-- Platter Rim -->
-  <circle cx="300" cy="195" r="128" fill="url(#plate)" stroke="#fde68a" stroke-width="3" stroke-opacity="0.6"/>
-  <circle cx="300" cy="195" r="98" fill="rgba(0,0,0,0.28)" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <!-- Garnish Dots -->
-  <circle cx="240" cy="155" r="12" fill="#fde68a" fill-opacity="0.5"/>
-  <circle cx="355" cy="160" r="10" fill="#22c55e" fill-opacity="0.65"/>
-  <circle cx="345" cy="240" r="14" fill="#fde68a" fill-opacity="0.45"/>
-  <circle cx="250" cy="235" r="9" fill="#ef4444" fill-opacity="0.65"/>
-  <!-- Center Dish Visual -->
-  <text x="300" y="222" font-family="Segoe UI Emoji, Apple Color Emoji, sans-serif" font-size="84" text-anchor="middle">🍲</text>
-  <!-- Label Banner -->
-  <rect x="30" y="344" width="540" height="52" rx="14" fill="rgba(0,0,0,0.45)" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-  <text x="300" y="376" font-family="Segoe UI, sans-serif" font-weight="700" font-size="20" text-anchor="middle" fill="#ffffff" letter-spacing="0.5">24-Hr Coal Dal Makhani</text>
+  <ellipse cx="150" cy="132" rx="98" ry="86" fill="url(#sh)"/>
+  <circle cx="150" cy="118" r="86" fill="#B45309" stroke="#FDE68A" stroke-width="3"/>
+  <circle cx="150" cy="118" r="75" fill="url(#dal)"/>
+  <!-- Butter & Cream Swirl -->
+  <path d="M112 118 C122 88, 178 88, 186 118 C192 146, 134 156, 124 128 C120 112, 156 105, 164 120" stroke="#FFFBEB" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+  <!-- White Makkhan Dollop -->
+  <circle cx="150" cy="118" r="14" fill="#FEFCE8"/>
+  <circle cx="147" cy="115" r="10" fill="#FFFFFF"/>
+  <!-- Ginger Juliennes & Coriander -->
+  <line x1="130" y1="95" x2="144" y2="102" stroke="#FDE047" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="165" y1="132" x2="180" y2="126" stroke="#FDE047" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="162" cy="102" r="4.5" fill="#22C55E"/>
+  <circle cx="132" y="134" r="4" fill="#16A34A"/>
 </svg>

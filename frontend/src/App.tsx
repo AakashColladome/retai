@@ -1,9 +1,9 @@
 import React, { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { DemoPresenterBar } from "@/components/DemoPresenterBar";
+import { DemoPresenterBar, PATH_TO_ROLE } from "@/components/DemoPresenterBar";
 import { apiFetch, buildWsUrl } from "@/lib/api";
 import { applyTenantThemeVars, playAlertChime } from "@/lib/utils";
-import { useAppStore } from "@/store/useAppStore";
+import { AppRole, useAppStore } from "@/store/useAppStore";
 import { CustomerView } from "@/views/CustomerView";
 import { KitchenKDSView } from "@/views/KitchenKDSView";
 import { ManagerFloorView } from "@/views/ManagerFloorView";
@@ -16,9 +16,39 @@ export const App: React.FC = () => {
     activeRole,
     staffToken,
     activeSession,
+    setActiveRole,
     setStaffAuth,
     setLastAmberAlert,
   } = useAppStore();
+
+  // Sync URL pathname (/customer, /kitchen, /manager, /owner, /super-admin) with active portal role
+  useEffect(() => {
+    const syncFromPath = () => {
+      const path = window.location.pathname.toLowerCase();
+      const matchedRole: AppRole = PATH_TO_ROLE[path] || "customer";
+      if (matchedRole === "customer") {
+        setActiveRole("customer");
+      } else {
+        apiFetch("/api/auth/demo-switch", {
+          method: "POST",
+          body: JSON.stringify({
+            role: matchedRole,
+            restaurant_id: activeRestaurantId,
+          }),
+        })
+          .then((res) => {
+            setStaffAuth(res.access_token, res.name, matchedRole);
+          })
+          .catch(() => {
+            setActiveRole(matchedRole);
+          });
+      }
+    };
+
+    syncFromPath();
+    window.addEventListener("popstate", syncFromPath);
+    return () => window.removeEventListener("popstate", syncFromPath);
+  }, [activeRestaurantId]);
 
   // Fetch active tenant config and apply CSS theme variables
   const { data: restaurant } = useQuery<any>({
@@ -38,7 +68,7 @@ export const App: React.FC = () => {
       apiFetch("/api/auth/demo-switch", {
         method: "POST",
         body: JSON.stringify({
-          role: "manager",
+          role: activeRole === "customer" ? "manager" : activeRole,
           restaurant_id: activeRestaurantId,
         }),
       })
@@ -47,7 +77,7 @@ export const App: React.FC = () => {
         })
         .catch(() => {});
     }
-  }, [activeRestaurantId, staffToken]);
+  }, [activeRestaurantId, staffToken, activeRole]);
 
   // Connect to isolated per-restaurant WebSocket channel (/ws/{restaurant_id}?token=...)
   useEffect(() => {
@@ -118,8 +148,7 @@ export const App: React.FC = () => {
   }, [activeRestaurantId, activeRole, staffToken, activeSession?.session_token, queryClient]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <DemoPresenterBar />
+    <div className="min-h-screen bg-[#F7F5F2] text-[#141414] flex flex-col">
       <main className="flex-1">
         {activeRole === "customer" && <CustomerView />}
         {activeRole === "kitchen" && <KitchenKDSView />}
@@ -128,6 +157,7 @@ export const App: React.FC = () => {
         )}
         {activeRole === "super_admin" && <SuperAdminView />}
       </main>
+      <DemoPresenterBar />
     </div>
   );
 };

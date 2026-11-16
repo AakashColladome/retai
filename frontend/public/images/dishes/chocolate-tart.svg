@@ -1,29 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 420" width="600" height="420">
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#31102f"/>
-      <stop offset="100%" stop-color="#86198f"/>
-    </linearGradient>
-    <radialGradient id="plate" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#fae8ff" stop-opacity="0.35"/>
-      <stop offset="70%" stop-color="#ffffff" stop-opacity="0.12"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.3"/>
-    </radialGradient>
-  </defs>
-  <rect width="600" height="420" fill="url(#bg)"/>
-  <circle cx="480" cy="80" r="140" fill="rgba(255,255,255,0.05)"/>
-  <circle cx="110" cy="350" r="160" fill="rgba(0,0,0,0.18)"/>
-  <!-- Platter Rim -->
-  <circle cx="300" cy="195" r="128" fill="url(#plate)" stroke="#fae8ff" stroke-width="3" stroke-opacity="0.6"/>
-  <circle cx="300" cy="195" r="98" fill="rgba(0,0,0,0.28)" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <!-- Garnish Dots -->
-  <circle cx="240" cy="155" r="12" fill="#fae8ff" fill-opacity="0.5"/>
-  <circle cx="355" cy="160" r="10" fill="#22c55e" fill-opacity="0.65"/>
-  <circle cx="345" cy="240" r="14" fill="#fae8ff" fill-opacity="0.45"/>
-  <circle cx="250" cy="235" r="9" fill="#ef4444" fill-opacity="0.65"/>
-  <!-- Center Dish Visual -->
-  <text x="300" y="222" font-family="Segoe UI Emoji, Apple Color Emoji, sans-serif" font-size="84" text-anchor="middle">🍫</text>
-  <!-- Label Banner -->
-  <rect x="30" y="344" width="540" height="52" rx="14" fill="rgba(0,0,0,0.45)" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-  <text x="300" y="376" font-family="Segoe UI, sans-serif" font-weight="700" font-size="20" text-anchor="middle" fill="#ffffff" letter-spacing="0.5">Belgian Dark Chocolate Tart</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 240">
+  <ellipse cx="150" cy="132" rx="92" ry="78" fill="#000" fill-opacity="0.14"/>
+  <circle cx="150" cy="118" r="84" fill="#FFFFFF" stroke="#E7E5E4" stroke-width="3"/>
+  <!-- Tart Shell -->
+  <circle cx="150" cy="118" r="56" fill="#D97706" stroke="#92400E" stroke-width="4" stroke-dasharray="10 4"/>
+  <!-- Dark Chocolate Ganache -->
+  <circle cx="150" cy="118" r="48" fill="#271001"/>
+  <path d="M122 114 Q150 92 178 118" stroke="#451A03" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <!-- Raspberries & Gold Leaf -->
+  <circle cx="144" cy="116" r="9" fill="#E11D48"/>
+  <circle cx="158" cy="122" r="8" fill="#BE123C"/>
+  <circle cx="152" cy="106" r="4" fill="#FACC15"/>
+  <ellipse cx="132" cy="124" rx="7" ry="3.5" transform="rotate(-25 132 124)" fill="#16A34A"/>
 </svg>

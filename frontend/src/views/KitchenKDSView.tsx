@@ -1,13 +1,11 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  CheckCircle2,
+  Bell,
   ChefHat,
   Clock,
   Flame,
-  Plus,
   RefreshCw,
-  Sparkles,
   Timer,
   UtensilsCrossed,
 } from "lucide-react";
@@ -18,6 +16,12 @@ import { useAppStore } from "@/store/useAppStore";
 export const KitchenKDSView: React.FC = () => {
   const queryClient = useQueryClient();
   const { activeRestaurantId } = useAppStore();
+  const [filterStage, setFilterStage] = useState<string>("all");
+
+  const { data: restaurant } = useQuery<any>({
+    queryKey: ["restaurant", activeRestaurantId],
+    queryFn: () => apiFetch(`/api/restaurants/${activeRestaurantId}`),
+  });
 
   const { data: orders = [], isLoading } = useQuery<any[]>({
     queryKey: ["orders", activeRestaurantId],
@@ -32,16 +36,21 @@ export const KitchenKDSView: React.FC = () => {
   });
 
   const activeKitchenOrders = orders.filter((o) => o.status !== "paid");
+  const filteredOrders =
+    filterStage === "all"
+      ? activeKitchenOrders
+      : activeKitchenOrders.filter((o) => o.status === filterStage);
+
   const pendingCount = activeKitchenOrders.filter(
     (o) => o.status === "queued" || o.status === "preparing"
   ).length;
 
   const crowdState =
     pendingCount >= 5
-      ? { label: "Peak Rush Load (+8m Auto Buffer)", color: "text-rose-400 bg-rose-500/15 border-rose-500/30" }
+      ? { label: "Peak Rush (+8m Auto ETA)", badge: "bg-rose-500 text-white" }
       : pendingCount >= 2
-      ? { label: "Moderate Kitchen Load (+4m Buffer)", color: "text-amber-300 bg-amber-500/15 border-amber-500/30" }
-      : { label: "Normal Kitchen Load (Standard Prep)", color: "text-emerald-300 bg-emerald-500/15 border-emerald-500/30" };
+      ? { label: "Moderate Load (+4m Buffer)", badge: "bg-[#FF6B4A] text-white" }
+      : { label: "Standard Load", badge: "bg-emerald-600 text-white" };
 
   const handleUpdateOrder = async (
     orderId: string,
@@ -71,236 +80,267 @@ export const KitchenKDSView: React.FC = () => {
     }
   };
 
-  const stages: { id: string; label: string; badge: string }[] = [
-    { id: "queued", label: "Queued", badge: "bg-rose-500/20 text-rose-300 border-rose-500/40" },
-    { id: "preparing", label: "Preparing", badge: "bg-amber-500/20 text-amber-300 border-amber-500/40" },
-    { id: "ready", label: "Ready for Pickup", badge: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" },
-    { id: "served", label: "Served at Table", badge: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40" },
+  const stages = [
+    { id: "queued", label: "Queued" },
+    { id: "preparing", label: "Preparing" },
+    { id: "ready", label: "Ready" },
+    { id: "served", label: "Served" },
   ];
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
-      {/* KDS Top Command Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900 border border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-2xl bg-orange-600/20 border border-orange-500/30 text-orange-400">
-            <ChefHat className="w-7 h-7" />
+    <div className="min-h-screen bg-[#F7F5F2] text-[#141414] pb-24">
+      {/* Standalone Kitchen Portal Top Navigation */}
+      <header className="bg-white border-b border-stone-200/80 px-6 py-4 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-[#141414] text-white flex items-center justify-center shadow-sm">
+              <ChefHat className="w-5 h-5 text-[#FF6B4A]" />
+            </div>
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-stone-400">
+                {restaurant?.name || "Restaurant"} • Kitchen Portal (/kitchen)
+              </div>
+              <h1 className="text-xl font-extrabold text-[#141414] tracking-tight">
+                Kitchen Display System <span className="font-light text-stone-400">& Prep Timer</span>
+              </h1>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-extrabold text-white">
-              Live Kitchen Display System (KDS) & Crowd Prep Engine
-            </h1>
-            <p className="text-xs text-slate-400">
-              Real-time WebSocket ticket board • Adjust prep times manually or let crowd-load auto-calculate ETA
+
+          {/* Stage Filter Pills & Crowd Indicator */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center bg-[#F7F5F2] p-1 rounded-full border border-stone-200/70 text-xs font-bold">
+              <button
+                onClick={() => setFilterStage("all")}
+                className={`px-3.5 py-1.5 rounded-full transition ${
+                  filterStage === "all"
+                    ? "bg-[#141414] text-white"
+                    : "text-stone-500 hover:text-[#141414]"
+                }`}
+              >
+                All ({activeKitchenOrders.length})
+              </button>
+              {stages.map((st) => (
+                <button
+                  key={st.id}
+                  onClick={() => setFilterStage(st.id)}
+                  className={`px-3.5 py-1.5 rounded-full transition ${
+                    filterStage === st.id
+                      ? "bg-[#141414] text-white"
+                      : "text-stone-500 hover:text-[#141414]"
+                  }`}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
+
+            <span
+              className={`px-3.5 py-2 rounded-full text-xs font-extrabold flex items-center gap-1.5 ${crowdState.badge}`}
+            >
+              <Flame className="w-3.5 h-3.5" />
+              {crowdState.label}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto p-6 space-y-6">
+        {/* Live Table Essentials / Runner Bar */}
+        {serviceRequests.length > 0 && (
+          <div className="bg-white rounded-[28px] p-5 shadow-[0_8px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-3">
+            <div className="text-xs font-extrabold text-[#141414] flex items-center gap-2">
+              <Bell className="w-4 h-4 text-[#FF6B4A]" />
+              <span>Table Runner & Essentials Queue ({serviceRequests.length})</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {serviceRequests.map((sr: any) => (
+                <div
+                  key={sr.id}
+                  className="p-3.5 rounded-2xl bg-[#FAF8F6] border border-stone-200/70 flex items-center justify-between gap-2"
+                >
+                  <div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-[#141414] text-white font-extrabold text-[10px]">
+                      TABLE #{sr.table_number}
+                    </span>
+                    <div className="text-xs font-bold text-[#141414] mt-1">{sr.label}</div>
+                  </div>
+                  <button
+                    onClick={() => handleCompleteServiceReq(sr.id)}
+                    className="px-3.5 py-1.5 rounded-full bg-[#FF6B4A] hover:bg-[#141414] text-white text-xs font-bold transition"
+                  >
+                    Mark Sent ✓
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Kitchen Order Tickets Grid */}
+        {isLoading ? (
+          <div className="text-center py-20 text-stone-400 text-sm">
+            Loading kitchen tickets...
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="bg-white rounded-[36px] p-14 text-center space-y-3 shadow-[0_8px_30px_rgba(0,0,0,0.03)]">
+            <UtensilsCrossed className="w-10 h-10 text-stone-300 mx-auto" />
+            <h3 className="text-lg font-extrabold text-[#141414]">
+              All Kitchen Tickets Cleared
+            </h3>
+            <p className="text-xs text-stone-400 max-w-sm mx-auto">
+              New orders placed from any Table Tablet or QR code will chime and appear here in real time.
             </p>
           </div>
-        </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filteredOrders.map((order: any) => {
+              const currentPrep =
+                order.effective_prep_minutes || order.estimated_prep_minutes || 15;
 
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${crowdState.color}`}>
-            <Flame className="w-4 h-4" />
-            {crowdState.label}
-          </span>
-          <span className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-300">
-            Active Tickets: <strong className="text-white">{activeKitchenOrders.length}</strong>
-          </span>
-        </div>
-      </div>
-
-      {/* Quick Runner / Kitchen Condiment Service Requests */}
-      {serviceRequests.length > 0 && (
-        <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-500/40 space-y-2.5">
-          <div className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4" />
-            Live Table Essentials & Runner Requests ({serviceRequests.length})
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {serviceRequests.map((sr: any) => (
-              <div
-                key={sr.id}
-                className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 flex items-center justify-between gap-2"
-              >
-                <div>
-                  <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-extrabold text-[10px]">
-                    TABLE #{sr.table_number}
-                  </span>
-                  <div className="text-xs font-bold text-white mt-1">{sr.label}</div>
-                </div>
-                <button
-                  onClick={() => handleCompleteServiceReq(sr.id)}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+              return (
+                <div
+                  key={order.id}
+                  className="bg-white rounded-[32px] p-5 shadow-[0_12px_36px_rgba(20,20,20,0.04)] border border-stone-200/60 flex flex-col justify-between space-y-4"
                 >
-                  Mark Sent ✓
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Active Kitchen Order Tickets Grid */}
-      {isLoading ? (
-        <div className="text-center py-16 text-slate-400 text-sm">Loading live kitchen tickets...</div>
-      ) : activeKitchenOrders.length === 0 ? (
-        <div className="p-12 rounded-3xl bg-slate-900/60 border border-slate-800 text-center space-y-2">
-          <UtensilsCrossed className="w-10 h-10 text-slate-600 mx-auto" />
-          <h3 className="text-base font-bold text-white">No Active Kitchen Tickets Right Now</h3>
-          <p className="text-xs text-slate-400">
-            Place a new order from the Customer (Tablet / QR) view and watch it appear here with a live chime!
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {activeKitchenOrders.map((order: any) => {
-            const currentPrep = order.effective_prep_minutes || order.estimated_prep_minutes || 15;
-            const currentStage = stages.find((s) => s.id === order.status) || stages[0];
-
-            return (
-              <div
-                key={order.id}
-                className="rounded-2xl bg-slate-900 border-2 border-slate-800 flex flex-col justify-between overflow-hidden shadow-xl"
-              >
-                {/* Ticket Top Bar */}
-                <div>
-                  <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="px-3 py-1 rounded-xl bg-orange-600 text-white font-black text-base">
-                        TABLE #{order.table_number}
-                      </span>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded font-bold border ${currentStage.badge}`}
-                          >
-                            {currentStage.label.toUpperCase()}
+                  <div className="space-y-4">
+                    {/* Ticket Header */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-[#141414] text-white flex flex-col items-center justify-center">
+                          <span className="text-[9px] font-bold text-stone-400 uppercase leading-none">
+                            TABLE
                           </span>
-                          {order.occasion && (
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold uppercase">
-                              🎉 {order.occasion}
-                            </span>
-                          )}
+                          <span className="text-lg font-black leading-tight">
+                            #{order.table_number}
+                          </span>
                         </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          {order.is_phone_verified
-                            ? `Verified Guest (${order.customer_phone})`
-                            : "Walk-in Guest"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <div className="text-xs text-slate-400">Bill Value</div>
-                      <div className="text-sm font-bold text-emerald-400">
-                        {formatPaise(order.total_paise)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Prep Time Controller (AI Crowd Estimate + Manual Chef Override) */}
-                  <div className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <Timer className="w-4 h-4 text-amber-400" />
-                      <span className="text-xs text-slate-300">Prep ETA:</span>
-                      <span className="text-sm font-extrabold text-amber-300">
-                        {currentPrep} mins
-                      </span>
-                      {order.manual_prep_override_minutes && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                          Manual
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() =>
-                          handleUpdateOrder(order.id, {
-                            manual_prep_override_minutes: Math.max(2, currentPrep - 2),
-                          })
-                        }
-                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 border border-slate-700"
-                      >
-                        -2m
-                      </button>
-                      <button
-                        onClick={() =>
-                          handleUpdateOrder(order.id, {
-                            manual_prep_override_minutes: currentPrep + 2,
-                          })
-                        }
-                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300 border border-slate-700"
-                      >
-                        +2m
-                      </button>
-                      <button
-                        onClick={() =>
-                          handleUpdateOrder(order.id, {
-                            manual_prep_override_minutes: currentPrep + 5,
-                          })
-                        }
-                        className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-bold text-orange-400 border border-slate-700"
-                      >
-                        +5m
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Line Items List */}
-                  <div className="p-4 space-y-2.5">
-                    {order.items.map((item: any, idx: number) => (
-                      <div
-                        key={idx}
-                        className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-2"
-                      >
                         <div>
                           <div className="flex items-center gap-1.5">
-                            <span className="px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 font-extrabold text-xs">
-                              {item.qty}x
+                            <span className="px-2.5 py-0.5 rounded-full bg-[#FF6B4A]/15 text-[#FF6B4A] text-[10px] font-extrabold uppercase">
+                              {order.status}
                             </span>
-                            <span className="text-xs font-bold text-white">
-                              {item.name.replace(" (3D View)", "")}
-                            </span>
-                            {item.is_repeat && (
-                              <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold flex items-center gap-0.5">
-                                <RefreshCw className="w-2.5 h-2.5" /> REPEAT
+                            {order.occasion && (
+                              <span className="px-2.5 py-0.5 rounded-full bg-[#F7F5F2] text-[#141414] text-[10px] font-bold uppercase">
+                                🎉 {order.occasion}
                               </span>
                             )}
                           </div>
-                          {item.notes && (
-                            <div className="text-[11px] text-amber-300 mt-1 font-medium">
-                              Chef Note: {item.notes}
-                            </div>
-                          )}
+                          <div className="text-xs text-stone-400 mt-1">
+                            {order.is_phone_verified
+                              ? `VIP Guest • ${order.customer_phone}`
+                              : "Guest Diner"}
+                          </div>
                         </div>
                       </div>
-                    ))}
+
+                      <div className="text-right">
+                        <div className="text-[11px] text-stone-400">Total</div>
+                        <div className="text-sm font-extrabold text-[#141414]">
+                          {formatPaise(order.total_paise)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Manual & Crowd Prep Timer Strip */}
+                    <div className="p-3 rounded-2xl bg-[#FAF8F6] border border-stone-200/60 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Timer className="w-4 h-4 text-[#FF6B4A]" />
+                        <span className="text-xs font-bold text-[#141414]">
+                          Prep ETA: {currentPrep}m
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() =>
+                            handleUpdateOrder(order.id, {
+                              manual_prep_override_minutes: Math.max(2, currentPrep - 2),
+                            })
+                          }
+                          className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-[11px] font-extrabold text-[#141414] hover:bg-[#141414] hover:text-white transition"
+                        >
+                          -2m
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleUpdateOrder(order.id, {
+                              manual_prep_override_minutes: currentPrep + 2,
+                            })
+                          }
+                          className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-[11px] font-extrabold text-[#141414] hover:bg-[#141414] hover:text-white transition"
+                        >
+                          +2m
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleUpdateOrder(order.id, {
+                              manual_prep_override_minutes: currentPrep + 5,
+                            })
+                          }
+                          className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-[11px] font-extrabold text-[#FF6B4A] hover:bg-[#FF6B4A] hover:text-white transition"
+                        >
+                          +5m
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Dishes List */}
+                    <div className="space-y-2">
+                      {order.items.map((item: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className="p-3 rounded-2xl bg-[#FAF8F6] flex items-start justify-between gap-2"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-6 h-6 rounded-full bg-[#141414] text-white font-extrabold text-xs flex items-center justify-center shrink-0">
+                                {item.qty}
+                              </span>
+                              <span className="text-xs font-extrabold text-[#141414]">
+                                {item.name.replace(" (3D View)", "")}
+                              </span>
+                              {item.is_repeat && (
+                                <span className="px-2 py-0.5 rounded-full bg-[#FF6B4A] text-white text-[9px] font-extrabold flex items-center gap-0.5">
+                                  <RefreshCw className="w-2.5 h-2.5" /> REPEAT
+                                </span>
+                              )}
+                            </div>
+                            {item.notes && (
+                              <div className="text-[11px] font-semibold text-[#FF6B4A] mt-1 pl-8">
+                                Note: {item.notes}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Stage Selector Pill Row */}
+                  <div className="grid grid-cols-4 gap-1.5 bg-[#FAF8F6] p-1.5 rounded-full border border-stone-200/70">
+                    {stages.map((st) => {
+                      const active = order.status === st.id;
+                      return (
+                        <button
+                          key={st.id}
+                          onClick={() => handleUpdateOrder(order.id, { status: st.id })}
+                          className={`py-2 rounded-full text-[11px] font-extrabold transition ${
+                            active
+                              ? "bg-[#141414] text-white shadow-xs"
+                              : "text-stone-400 hover:text-[#141414]"
+                          }`}
+                        >
+                          {st.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-
-                {/* Stage Progression Buttons */}
-                <div className="p-3.5 bg-slate-950 border-t border-slate-800 grid grid-cols-4 gap-1.5">
-                  {stages.map((st) => {
-                    const active = order.status === st.id;
-                    return (
-                      <button
-                        key={st.id}
-                        onClick={() => handleUpdateOrder(order.id, { status: st.id })}
-                        className={`py-2 px-1.5 rounded-xl text-[11px] font-bold transition text-center ${
-                          active
-                            ? "bg-orange-600 text-white shadow"
-                            : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
-                        }`}
-                      >
-                        {st.label.split(" ")[0]}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

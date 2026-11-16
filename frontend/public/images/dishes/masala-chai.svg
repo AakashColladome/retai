@@ -1,29 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 420" width="600" height="420">
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#431407"/>
-      <stop offset="100%" stop-color="#c2410c"/>
-    </linearGradient>
-    <radialGradient id="plate" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ffedd5" stop-opacity="0.35"/>
-      <stop offset="70%" stop-color="#ffffff" stop-opacity="0.12"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.3"/>
-    </radialGradient>
-  </defs>
-  <rect width="600" height="420" fill="url(#bg)"/>
-  <circle cx="480" cy="80" r="140" fill="rgba(255,255,255,0.05)"/>
-  <circle cx="110" cy="350" r="160" fill="rgba(0,0,0,0.18)"/>
-  <!-- Platter Rim -->
-  <circle cx="300" cy="195" r="128" fill="url(#plate)" stroke="#ffedd5" stroke-width="3" stroke-opacity="0.6"/>
-  <circle cx="300" cy="195" r="98" fill="rgba(0,0,0,0.28)" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <!-- Garnish Dots -->
-  <circle cx="240" cy="155" r="12" fill="#ffedd5" fill-opacity="0.5"/>
-  <circle cx="355" cy="160" r="10" fill="#22c55e" fill-opacity="0.65"/>
-  <circle cx="345" cy="240" r="14" fill="#ffedd5" fill-opacity="0.45"/>
-  <circle cx="250" cy="235" r="9" fill="#ef4444" fill-opacity="0.65"/>
-  <!-- Center Dish Visual -->
-  <text x="300" y="222" font-family="Segoe UI Emoji, Apple Color Emoji, sans-serif" font-size="84" text-anchor="middle">☕</text>
-  <!-- Label Banner -->
-  <rect x="30" y="344" width="540" height="52" rx="14" fill="rgba(0,0,0,0.45)" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-  <text x="300" y="376" font-family="Segoe UI, sans-serif" font-weight="700" font-size="20" text-anchor="middle" fill="#ffffff" letter-spacing="0.5">Adrak Elaichi Kulhad Chai</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 240">
+  <ellipse cx="150" cy="146" rx="74" ry="50" fill="#000" fill-opacity="0.14"/>
+  <circle cx="150" cy="122" r="78" fill="#F5F5F4" stroke="#D6D3D1" stroke-width="3"/>
+  <!-- Terracotta Kulhad -->
+  <circle cx="150" cy="118" r="54" fill="#9A3412" stroke="#7C2D12" stroke-width="4"/>
+  <!-- Masala Chai Surface -->
+  <circle cx="150" cy="118" r="46" fill="#D97706"/>
+  <circle cx="146" cy="114" r="36" fill="#B45309"/>
+  <!-- Foam bubbles & Cardamom -->
+  <circle cx="132" cy="102" r="5" fill="#FDE68A" fill-opacity="0.7"/>
+  <circle cx="142" cy="96" r="3.5" fill="#FEF3C7" fill-opacity="0.8"/>
+  <circle cx="166" cy="128" r="4" fill="#FDE68A" fill-opacity="0.6"/>
+  <ellipse cx="152" cy="116" rx="6" ry="3.5" transform="rotate(15 152 116)" fill="#84CC16"/>
 </svg>
