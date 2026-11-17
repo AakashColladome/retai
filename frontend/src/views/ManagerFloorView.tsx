@@ -8,10 +8,11 @@ import {
   FileSpreadsheet,
   LayoutGrid,
   Lock,
+  Plus,
   Sparkles,
-  TrendingUp,
   UserPlus,
   Users,
+  Utensils,
   Volume2,
   XCircle,
 } from "lucide-react";
@@ -24,6 +25,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import {
+  InternalPortalLayout,
+  SidebarMenuItem,
+} from "@/components/InternalPortalLayout";
 import { apiFetch } from "@/lib/api";
 import { formatPaise, playAlertChime } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
@@ -39,22 +44,25 @@ export const ManagerFloorView: React.FC = () => {
     setActiveRole,
   } = useAppStore();
 
-  const [activeTab, setActiveTab] = useState<
-    "floor" | "analytics" | "settlements" | "customers"
-  >(activeRole === "owner" ? "analytics" : "floor");
+  const isOwnerPortal = activeRole === "owner";
+
+  const [activeTab, setActiveTab] = useState<string>(
+    isOwnerPortal ? "analytics" : "floor"
+  );
+
+  // Add Menu Item State (for Owner/Manager Menu Manager tab)
+  const [newDishName, setNewDishName] = useState("");
+  const [newDishCategory, setNewDishCategory] = useState("Main Course Handi");
+  const [newDishPriceRupees, setNewDishPriceRupees] = useState("280");
+  const [newDishPrep, setNewDishPrep] = useState("12");
+  const [newDishDesc, setNewDishDesc] = useState(
+    "Prepared fresh with house-ground spices and farm ingredients."
+  );
+  const [dishBusy, setDishBusy] = useState(false);
 
   useEffect(() => {
-    if (activeRole === "owner") {
-      setActiveTab("analytics");
-    } else {
-      setActiveTab("floor");
-    }
+    setActiveTab(activeRole === "owner" ? "analytics" : "floor");
   }, [activeRole]);
-
-  const { data: restaurant } = useQuery<any>({
-    queryKey: ["restaurant", activeRestaurantId],
-    queryFn: () => apiFetch(`/api/restaurants/${activeRestaurantId}`),
-  });
 
   const { data: tables = [] } = useQuery<any[]>({
     queryKey: ["tables", activeRestaurantId],
@@ -68,6 +76,11 @@ export const ManagerFloorView: React.FC = () => {
     refetchInterval: 4000,
   });
 
+  const { data: menuData } = useQuery<any>({
+    queryKey: ["menu", activeRestaurantId],
+    queryFn: () => apiFetch(`/api/menu/${activeRestaurantId}`),
+  });
+
   const { data: analytics } = useQuery<any>({
     queryKey: ["analytics", activeRestaurantId],
     queryFn: () => apiFetch(`/api/analytics/${activeRestaurantId}`),
@@ -79,6 +92,78 @@ export const ManagerFloorView: React.FC = () => {
     queryFn: () => apiFetch(`/api/settlements/${activeRestaurantId}`),
     enabled: activeTab === "settlements",
   });
+
+  const emptyCount = tables.filter((t) => t.status === "empty").length;
+  const seatedCount = tables.filter((t) => t.status === "seated").length;
+  const amberCount = tables.filter((t) => t.status === "amber").length;
+
+  const sidebarItems: SidebarMenuItem[] = isOwnerPortal
+    ? [
+        {
+          id: "analytics",
+          label: "Executive Analytics",
+          icon: <BarChart3 className="w-4 h-4" />,
+        },
+        {
+          id: "settlements",
+          label: "Settlement Report",
+          icon: <FileSpreadsheet className="w-4 h-4" />,
+          badge: "Read-Only",
+        },
+        {
+          id: "menu",
+          label: "Menu & Dish Catalog",
+          icon: <Utensils className="w-4 h-4" />,
+          badge: menuData?.items?.length || 0,
+        },
+        {
+          id: "customers",
+          label: "Retained Guests (DPDP)",
+          icon: <Users className="w-4 h-4" />,
+          badge: analytics?.retained_customers?.length,
+        },
+        {
+          id: "floor",
+          label: "Live Floor Map",
+          icon: <LayoutGrid className="w-4 h-4" />,
+          badge: amberCount > 0 ? `${amberCount} Amber` : seatedCount,
+          badgeColor: amberCount > 0 ? "bg-amber-400 text-[#141414]" : undefined,
+        },
+      ]
+    : [
+        {
+          id: "floor",
+          label: "Live Table Map",
+          icon: <LayoutGrid className="w-4 h-4" />,
+          badge: amberCount > 0 ? `${amberCount} Amber` : `${seatedCount} Seated`,
+          badgeColor: amberCount > 0 ? "bg-amber-400 text-[#141414]" : undefined,
+        },
+        {
+          id: "requests",
+          label: "1-Tap Guest Requests",
+          icon: <Bell className="w-4 h-4" />,
+          badge: serviceRequests.length,
+          badgeColor:
+            serviceRequests.length > 0 ? "bg-[#FF6B4A] text-white" : undefined,
+        },
+        {
+          id: "menu",
+          label: "Menu & Dish Manager",
+          icon: <Utensils className="w-4 h-4" />,
+          badge: menuData?.items?.length || 0,
+        },
+        {
+          id: "analytics",
+          label: "Floor Analytics",
+          icon: <BarChart3 className="w-4 h-4" />,
+        },
+        {
+          id: "cctv",
+          label: "CCTV Vision Roadmap",
+          icon: <Camera className="w-4 h-4" />,
+          badge: "Phase 2",
+        },
+      ];
 
   const handleMarkSeated = async (tableNumber: number, guests = 2) => {
     try {
@@ -133,107 +218,82 @@ export const ManagerFloorView: React.FC = () => {
         method: "PATCH",
         body: JSON.stringify({ status: "completed" }),
       });
-      queryClient.invalidateQueries({ queryKey: ["service-requests", activeRestaurantId] });
+      queryClient.invalidateQueries({
+        queryKey: ["service-requests", activeRestaurantId],
+      });
     } catch (err: any) {
       alert(err.message);
     }
   };
 
-  const emptyCount = tables.filter((t) => t.status === "empty").length;
-  const seatedCount = tables.filter((t) => t.status === "seated").length;
-  const amberCount = tables.filter((t) => t.status === "amber").length;
-
-  const isOwnerPortal = activeRole === "owner";
+  const handleAddMenuItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDishName.trim()) return;
+    setDishBusy(true);
+    try {
+      const paise = Math.max(100, Math.round(Number(newDishPriceRupees) * 100));
+      await apiFetch(`/api/menu/${activeRestaurantId}`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: newDishName,
+          category: newDishCategory,
+          description: newDishDesc,
+          ingredients: ["Fresh Spices", "Chef Special"],
+          base_price_paise: paise,
+          prep_time_minutes: Number(newDishPrep) || 12,
+          is_veg: true,
+          spice_level: "medium",
+          image_url: "/images/dishes/paneer-butter-masala.svg",
+        }),
+      });
+      setNewDishName("");
+      queryClient.invalidateQueries({ queryKey: ["menu", activeRestaurantId] });
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setDishBusy(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#F7F5F2] text-[#141414] pb-24">
-      {/* Standalone Portal Top Header */}
-      <header className="bg-white border-b border-stone-200/80 px-6 py-4 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-[#141414] text-white flex items-center justify-center shadow-sm">
-              {isOwnerPortal ? (
-                <TrendingUp className="w-5 h-5 text-[#FF6B4A]" />
-              ) : (
-                <LayoutGrid className="w-5 h-5 text-[#FF6B4A]" />
-              )}
-            </div>
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-wider text-stone-400">
-                {restaurant?.name || "Restaurant"} •{" "}
-                {isOwnerPortal
-                  ? "Restaurant Admin Portal (/owner)"
-                  : "Floor Manager Portal (/manager)"}
-              </div>
-              <h1 className="text-xl font-extrabold text-[#141414] tracking-tight">
-                {isOwnerPortal ? (
-                  <>
-                    Owner Analytics <span className="font-light text-stone-400">& Settlements</span>
-                  </>
-                ) : (
-                  <>
-                    Live Table Map{" "}
-                    <span className="font-light text-stone-400">& Occupancy Radar</span>
-                  </>
-                )}
-              </h1>
-            </div>
+    <InternalPortalLayout
+      portalTitle={isOwnerPortal ? "Restaurant Admin Portal" : "Floor Manager Portal"}
+      portalSubtitle={
+        isOwnerPortal
+          ? "Executive analytics, read-only settlements, menu pricing & DPDP customer retention"
+          : "Live Red / Green / Amber table occupancy radar, guest service requests & floor alerts"
+      }
+      portalRoleBadge={isOwnerPortal ? "OWNER ADMIN" : "MANAGER"}
+      menuItems={sidebarItems}
+      activeMenuId={activeTab}
+      onSelectMenu={setActiveTab}
+      headerActions={
+        <div className="flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-2 text-xs font-bold">
+            <span className="px-3 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+              Empty: {emptyCount}
+            </span>
+            <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Seated: {seatedCount}
+            </span>
+            <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-300">
+              Amber: {amberCount}
+            </span>
           </div>
-
-          {/* Navigation Pill Tabs */}
-          <div className="flex items-center gap-1.5 bg-[#F7F5F2] p-1.5 rounded-full border border-stone-200/80 text-xs font-bold flex-wrap">
-            <button
-              onClick={() => setActiveTab("floor")}
-              className={`px-4 py-2 rounded-full flex items-center gap-1.5 transition ${
-                activeTab === "floor"
-                  ? "bg-[#141414] text-white shadow-xs"
-                  : "text-stone-500 hover:text-[#141414]"
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              Table Map ({tables.length})
-            </button>
-            <button
-              onClick={() => setActiveTab("analytics")}
-              className={`px-4 py-2 rounded-full flex items-center gap-1.5 transition ${
-                activeTab === "analytics"
-                  ? "bg-[#141414] text-white shadow-xs"
-                  : "text-stone-500 hover:text-[#141414]"
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              Analytics
-            </button>
-            <button
-              onClick={() => setActiveTab("customers")}
-              className={`px-4 py-2 rounded-full flex items-center gap-1.5 transition ${
-                activeTab === "customers"
-                  ? "bg-[#141414] text-white shadow-xs"
-                  : "text-stone-500 hover:text-[#141414]"
-              }`}
-            >
-              <Users className="w-3.5 h-3.5" />
-              Retained Guests
-            </button>
-            <button
-              onClick={() => setActiveTab("settlements")}
-              className={`px-4 py-2 rounded-full flex items-center gap-1.5 transition ${
-                activeTab === "settlements"
-                  ? "bg-[#141414] text-white shadow-xs"
-                  : "text-stone-500 hover:text-[#141414]"
-              }`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              Settlement Report
-            </button>
-          </div>
+          <button
+            onClick={() => playAlertChime("amber")}
+            className="px-3.5 py-1.5 rounded-xl bg-[#F7F5F2] hover:bg-[#141414] text-[#141414] hover:text-white text-xs font-bold transition flex items-center gap-1.5"
+          >
+            <Volume2 className="w-3.5 h-3.5 text-[#FF6B4A]" />
+            Chime
+          </button>
         </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
+      }
+    >
+      <div className="space-y-6">
         {/* Live Amber Alert Banner */}
         {lastAmberAlert && (
-          <div className="bg-amber-50 border-2 border-amber-400 rounded-[28px] p-5 flex flex-wrap items-center justify-between gap-4 shadow-lg">
+          <div className="bg-amber-50 border-2 border-amber-400 rounded-3xl p-5 flex flex-wrap items-center justify-between gap-4 shadow-md">
             <div className="flex items-center gap-3.5">
               <div className="w-11 h-11 rounded-2xl bg-amber-400 text-[#141414] flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-6 h-6" />
@@ -257,13 +317,13 @@ export const ManagerFloorView: React.FC = () => {
                   setActiveRole("customer");
                   setLastAmberAlert(null);
                 }}
-                className="px-4 py-2 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs transition"
+                className="px-4 py-2 rounded-xl bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs transition"
               >
                 Open Table #{lastAmberAlert.table_number} Menu →
               </button>
               <button
                 onClick={() => setLastAmberAlert(null)}
-                className="px-3.5 py-2 rounded-full bg-white border border-stone-200 text-xs font-bold text-stone-500"
+                className="px-3.5 py-2 rounded-xl bg-white border border-stone-200 text-xs font-bold text-stone-500"
               >
                 Dismiss
               </button>
@@ -272,245 +332,337 @@ export const ManagerFloorView: React.FC = () => {
         )}
 
         {/* ================================================================ */}
-        {/* TAB 1: LIVE TABLE OCCUPANCY MAP (RED / GREEN / AMBER)            */}
+        {/* VIEW 1: LIVE TABLE OCCUPANCY MAP (RED / GREEN / AMBER)           */}
         {/* ================================================================ */}
         {activeTab === "floor" && (
-          <div className="space-y-6">
-            {/* Occupancy Summary Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-[28px] p-4 shadow-[0_8px_28px_rgba(0,0,0,0.03)] border border-stone-200/60">
-              <div className="flex items-center gap-2 flex-wrap text-xs font-bold">
-                <span className="px-3.5 py-1.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                  Empty (Red): {emptyCount}
-                </span>
-                <span className="px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                  Seated (Green): {seatedCount}
-                </span>
-                <span className="px-3.5 py-1.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
-                  Idle No-Order (Amber): {amberCount}
-                </span>
-              </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+            {tables.map((t: any) => {
+              const isRed = t.status === "empty";
+              const isGreen = t.status === "seated";
+              const isAmber = t.status === "amber";
+              const sess = t.session;
+              const hasOrders = t.active_orders && t.active_orders.length > 0;
 
-              <button
-                onClick={() => playAlertChime("amber")}
-                className="px-3.5 py-1.5 rounded-full bg-[#F7F5F2] hover:bg-[#141414] text-[#141414] hover:text-white text-xs font-bold transition flex items-center gap-1.5"
-              >
-                <Volume2 className="w-3.5 h-3.5 text-[#FF6B4A]" />
-                Test Manager Chime
-              </button>
-            </div>
+              const statusPill = isRed
+                ? "bg-rose-500 text-white"
+                : isAmber
+                ? "bg-amber-400 text-[#141414] animate-pulse"
+                : "bg-emerald-600 text-white";
 
-            {/* Active 1-Tap Table Essentials Queue */}
-            {serviceRequests.length > 0 && (
-              <div className="bg-white rounded-[28px] p-5 shadow-[0_8px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-3">
-                <div className="text-xs font-extrabold text-[#141414] flex items-center gap-2">
-                  <Bell className="w-4 h-4 text-[#FF6B4A]" />
-                  <span>Active 1-Tap Guest Requests ({serviceRequests.length})</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {serviceRequests.map((sr: any) => (
-                    <div
-                      key={sr.id}
-                      className="p-3.5 rounded-2xl bg-[#FAF8F6] border border-stone-200/70 flex items-center justify-between"
-                    >
+              const borderStyle = isRed
+                ? "border-stone-200/90"
+                : isAmber
+                ? "border-amber-400 ring-2 ring-amber-300/40"
+                : "border-emerald-400";
+
+              return (
+                <div
+                  key={t.table_id}
+                  className={`bg-white rounded-3xl p-5 shadow-xs border-2 flex flex-col justify-between transition ${borderStyle}`}
+                >
+                  <div className="space-y-3.5">
+                    <div className="flex items-start justify-between gap-2">
                       <div>
-                        <span className="px-2.5 py-0.5 rounded-full bg-[#141414] text-white text-[10px] font-extrabold">
-                          Table #{sr.table_number}
-                        </span>
-                        <div className="text-xs font-bold text-[#141414] mt-1">
-                          {sr.label}
+                        <h3 className="text-lg font-extrabold text-[#141414]">
+                          Table #{t.table_number}
+                        </h3>
+                        <div className="text-[11px] font-medium text-stone-400">
+                          {t.zone} • {t.capacity} Seats
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleCompleteServiceReq(sr.id)}
-                        className="px-3.5 py-1.5 rounded-full bg-[#FF6B4A] hover:bg-[#141414] text-white text-xs font-bold transition"
+                      <span
+                        className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase ${statusPill}`}
                       >
-                        Done ✓
-                      </button>
+                        {isRed ? "Empty • Red" : isAmber ? "Amber • Idle" : "Seated • Green"}
+                      </span>
                     </div>
-                  ))}
+
+                    {isRed ? (
+                      <div className="py-8 rounded-2xl bg-[#FAF8F6] border border-stone-200/50 text-center text-xs font-medium text-stone-400">
+                        Available to seat guests
+                      </div>
+                    ) : (
+                      <div className="p-3.5 rounded-2xl bg-[#FAF8F6] border border-stone-200/70 space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-stone-500 font-medium flex items-center gap-1">
+                            <Users className="w-3.5 h-3.5 text-[#141414]" />
+                            <strong className="text-[#141414]">
+                              {sess?.guest_count} Guests
+                            </strong>
+                          </span>
+                          <span className="px-2 py-0.5 rounded-lg bg-white border border-stone-200 text-[#141414] font-bold text-[10px] uppercase">
+                            {sess?.source}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-stone-400">Seated Time</span>
+                          <span className="font-mono font-bold text-[#141414]">
+                            {sess?.seconds_seated || 0}s
+                            {!sess?.first_order_at &&
+                              ` / ${sess?.amber_threshold_seconds || 60}s`}
+                          </span>
+                        </div>
+
+                        {sess?.is_phone_verified ? (
+                          <div className="text-[11px] font-bold text-emerald-700">
+                            ✓ Verified: {sess.customer_phone} (5% Off)
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-stone-400">Guest Session</div>
+                        )}
+
+                        {hasOrders ? (
+                          <div className="pt-2 border-t border-stone-200/70 flex items-center justify-between">
+                            <span className="text-emerald-700 font-extrabold uppercase text-[11px]">
+                              {t.active_orders[0].status}
+                            </span>
+                            <span className="font-extrabold text-[#141414]">
+                              {formatPaise(t.active_orders[0].total_paise)}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="pt-2 border-t border-stone-200/70 flex items-center justify-between">
+                            <span className="text-amber-700 font-bold text-[11px]">
+                              No order yet
+                            </span>
+                            {isGreen && sess && (
+                              <button
+                                onClick={() => handleForceAmber(sess.session_id)}
+                                className="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-extrabold transition"
+                              >
+                                Test Amber 🔔
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-3.5 mt-3.5 border-t border-stone-100 flex items-center gap-2">
+                    {isRed ? (
+                      <button
+                        onClick={() => handleMarkSeated(t.table_number, t.capacity)}
+                        className="w-full py-2.5 rounded-xl bg-[#141414] hover:bg-[#FF6B4A] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        Mark Seated ({t.capacity} Guests)
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => {
+                            setSelectedTableNumber(t.table_number);
+                            window.history.pushState({}, "", "/customer");
+                            setActiveRole("customer");
+                          }}
+                          className="flex-1 py-2.5 rounded-xl bg-[#F7F5F2] hover:bg-[#141414] text-[#141414] hover:text-white text-xs font-bold transition"
+                        >
+                          Open Table
+                        </button>
+                        <button
+                          onClick={() => handleMarkEmpty(t.table_number)}
+                          className="px-3.5 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white text-xs font-bold transition flex items-center gap-1"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          Empty
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ================================================================ */}
+        {/* VIEW 2: 1-TAP GUEST SERVICE REQUESTS                             */}
+        {/* ================================================================ */}
+        {activeTab === "requests" && (
+          <div className="bg-white rounded-3xl p-6 shadow-xs border border-stone-200/80 space-y-4">
+            <h3 className="text-base font-extrabold text-[#141414]">
+              Active 1-Tap Table Requests ({serviceRequests.length})
+            </h3>
+            {serviceRequests.length === 0 ? (
+              <p className="text-xs text-stone-400 py-8 text-center">
+                All table requests for water, cutlery, and napkins have been fulfilled!
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {serviceRequests.map((sr: any) => (
+                  <div
+                    key={sr.id}
+                    className="p-4 rounded-2xl bg-[#FAF8F6] border border-stone-200/80 flex items-center justify-between"
+                  >
+                    <div>
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#141414] text-white text-[10px] font-extrabold">
+                        Table #{sr.table_number}
+                      </span>
+                      <div className="text-xs font-bold text-[#141414] mt-1.5">
+                        {sr.label}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleCompleteServiceReq(sr.id)}
+                      className="px-4 py-2 rounded-xl bg-[#FF6B4A] hover:bg-[#141414] text-white text-xs font-bold transition"
+                    >
+                      Done ✓
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
+          </div>
+        )}
 
-            {/* Table Cards Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {tables.map((t: any) => {
-                const isRed = t.status === "empty";
-                const isGreen = t.status === "seated";
-                const isAmber = t.status === "amber";
-                const sess = t.session;
-                const hasOrders = t.active_orders && t.active_orders.length > 0;
+        {/* ================================================================ */}
+        {/* VIEW 3: MENU & DISH CATALOG MANAGER                              */}
+        {/* ================================================================ */}
+        {activeTab === "menu" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left: Add New Dish Form */}
+            <form
+              onSubmit={handleAddMenuItem}
+              className="bg-white rounded-3xl p-6 shadow-xs border border-stone-200/80 space-y-4 h-fit text-xs"
+            >
+              <h3 className="text-base font-extrabold text-[#141414] flex items-center gap-2">
+                <Plus className="w-4 h-4 text-[#FF6B4A]" />
+                Add Dish to Menu
+              </h3>
+              <div>
+                <label className="block text-stone-400 font-bold mb-1">Dish Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newDishName}
+                  onChange={(e) => setNewDishName(e.target.value)}
+                  placeholder="e.g. Kadai Paneer Handi"
+                  className="w-full bg-[#F7F5F2] rounded-xl px-3.5 py-2.5 font-bold text-[#141414]"
+                />
+              </div>
+              <div>
+                <label className="block text-stone-400 font-bold mb-1">Category</label>
+                <input
+                  type="text"
+                  value={newDishCategory}
+                  onChange={(e) => setNewDishCategory(e.target.value)}
+                  className="w-full bg-[#F7F5F2] rounded-xl px-3.5 py-2.5 font-bold text-[#141414]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-stone-400 font-bold mb-1">
+                    Base Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min={10}
+                    value={newDishPriceRupees}
+                    onChange={(e) => setNewDishPriceRupees(e.target.value)}
+                    className="w-full bg-[#F7F5F2] rounded-xl px-3.5 py-2.5 font-bold text-[#141414]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-stone-400 font-bold mb-1">
+                    Prep Time (min)
+                  </label>
+                  <input
+                    type="number"
+                    min={2}
+                    value={newDishPrep}
+                    onChange={(e) => setNewDishPrep(e.target.value)}
+                    className="w-full bg-[#F7F5F2] rounded-xl px-3.5 py-2.5 font-bold text-[#141414]"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-stone-400 font-bold mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  value={newDishDesc}
+                  onChange={(e) => setNewDishDesc(e.target.value)}
+                  className="w-full bg-[#F7F5F2] rounded-xl px-3.5 py-2 font-medium text-[#141414]"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={dishBusy}
+                className="w-full py-3 rounded-xl bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold transition"
+              >
+                {dishBusy ? "Adding Dish..." : "Add Dish to Live Catalog"}
+              </button>
+            </form>
 
-                const statusPill = isRed
-                  ? "bg-rose-500 text-white"
-                  : isAmber
-                  ? "bg-amber-400 text-[#141414] animate-pulse"
-                  : "bg-emerald-600 text-white";
-
-                const borderStyle = isRed
-                  ? "border-rose-200/90"
-                  : isAmber
-                  ? "border-amber-400 ring-2 ring-amber-300/50"
-                  : "border-emerald-300";
-
-                return (
-                  <div
-                    key={t.table_id}
-                    className={`bg-white rounded-[32px] p-5 shadow-[0_10px_30px_rgba(20,20,20,0.04)] border-2 flex flex-col justify-between transition ${borderStyle}`}
-                  >
-                    <div className="space-y-3.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h3 className="text-lg font-extrabold text-[#141414]">
-                            Table #{t.table_number}
-                          </h3>
-                          <div className="text-[11px] font-medium text-stone-400">
-                            {t.zone} • {t.capacity} Seats
-                          </div>
-                        </div>
-                        <span
-                          className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase ${statusPill}`}
-                        >
-                          {isRed ? "Empty • Red" : isAmber ? "Amber • Idle" : "Seated • Green"}
-                        </span>
-                      </div>
-
-                      {isRed ? (
-                        <div className="py-7 rounded-2xl bg-rose-50/50 border border-rose-100 text-center text-xs font-medium text-rose-500">
-                          Available to seat guests
-                        </div>
-                      ) : (
-                        <div className="p-3.5 rounded-2xl bg-[#FAF8F6] border border-stone-200/60 space-y-2 text-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="text-stone-500 font-medium flex items-center gap-1">
-                              <Users className="w-3.5 h-3.5 text-[#141414]" />
-                              <strong className="text-[#141414]">
-                                {sess?.guest_count} Guests
-                              </strong>
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-white border border-stone-200 text-[#141414] font-bold text-[10px] uppercase">
-                              {sess?.source}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-stone-400">Seated Time</span>
-                            <span className="font-mono font-bold text-[#141414]">
-                              {sess?.seconds_seated || 0}s
-                              {!sess?.first_order_at &&
-                                ` / ${sess?.amber_threshold_seconds || 60}s`}
-                            </span>
-                          </div>
-
-                          {sess?.is_phone_verified ? (
-                            <div className="text-[11px] font-bold text-emerald-700">
-                              ✓ Verified: {sess.customer_phone} (5% Off)
-                            </div>
-                          ) : (
-                            <div className="text-[11px] text-stone-400">Guest Session</div>
-                          )}
-
-                          {hasOrders ? (
-                            <div className="pt-2 border-t border-stone-200/70 flex items-center justify-between">
-                              <span className="text-emerald-700 font-extrabold uppercase text-[11px]">
-                                {t.active_orders[0].status}
-                              </span>
-                              <span className="font-extrabold text-[#141414]">
-                                {formatPaise(t.active_orders[0].total_paise)}
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="pt-2 border-t border-stone-200/70 flex items-center justify-between">
-                              <span className="text-amber-700 font-bold text-[11px]">
-                                Waiting for 1st order
-                              </span>
-                              {isGreen && sess && (
-                                <button
-                                  onClick={() => handleForceAmber(sess.session_id)}
-                                  className="px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-extrabold transition"
-                                >
-                                  Trigger Amber 🔔
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-3.5 mt-3.5 border-t border-stone-100 flex items-center gap-2">
-                      {isRed ? (
-                        <button
-                          onClick={() => handleMarkSeated(t.table_number, t.capacity)}
-                          className="w-full py-2.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          Mark Seated ({t.capacity} Guests)
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => {
-                              setSelectedTableNumber(t.table_number);
-                              window.history.pushState({}, "", "/customer");
-                              setActiveRole("customer");
-                            }}
-                            className="flex-1 py-2.5 rounded-full bg-[#F7F5F2] hover:bg-[#141414] text-[#141414] hover:text-white text-xs font-bold transition"
-                          >
-                            Open Table
-                          </button>
-                          <button
-                            onClick={() => handleMarkEmpty(t.table_number)}
-                            className="px-3.5 py-2.5 rounded-full bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white text-xs font-bold transition flex items-center gap-1"
-                            title="Close Session & Return to Red"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                            Empty
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Phase 2 CCTV Roadmap Card */}
-            <div className="bg-white rounded-[32px] p-6 shadow-[0_8px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 flex flex-wrap items-center justify-between gap-4">
-              <div className="space-y-1 max-w-3xl">
-                <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-[#FF6B4A]/15 text-[#FF6B4A] text-[10px] font-extrabold uppercase">
-                  <Camera className="w-3 h-3" />
-                  Phase 2 Hardware Roadmap
-                </span>
+            {/* Right 2 Cols: Current Menu Items Table */}
+            <div className="lg:col-span-2 bg-white rounded-3xl p-6 shadow-xs border border-stone-200/80 space-y-4">
+              <div className="flex items-center justify-between">
                 <h3 className="text-base font-extrabold text-[#141414]">
-                  Overhead CCTV Occupancy Detection & Automated Table Turn SLA
+                  Active Menu Catalog ({menuData?.items?.length || 0} Dishes)
                 </h3>
-                <p className="text-xs text-stone-500 leading-relaxed">
-                  Connects existing overhead RTSP cameras in Phase 2 to automatically detect seated guest count (`source="cctv"`) and trigger Amber idle alerts if no order is placed within threshold. Use the{" "}
-                  <strong className="text-[#141414]">Portal Switcher → Simulate CCTV</strong> control to test this live today.
-                </p>
+                <span className="text-xs text-stone-400">
+                  Prices computed server-side in integer paise
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-stone-200 text-stone-400">
+                      <th className="py-3 px-2">Dish</th>
+                      <th className="py-3 px-2">Category</th>
+                      <th className="py-3 px-2">Base Price</th>
+                      <th className="py-3 px-2">Customer Display Price</th>
+                      <th className="py-3 px-2">Prep</th>
+                      <th className="py-3 px-2">Orders</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {(menuData?.items || []).map((item: any) => (
+                      <tr key={item.id} className="hover:bg-[#FAF8F6]">
+                        <td className="py-2.5 px-2 flex items-center gap-2.5 font-extrabold text-[#141414]">
+                          <img
+                            src={item.image_url}
+                            alt={item.name}
+                            className="w-10 h-10 object-contain shrink-0"
+                          />
+                          <span>{item.name.replace(" (3D View)", "")}</span>
+                        </td>
+                        <td className="py-2.5 px-2 text-stone-500">{item.category}</td>
+                        <td className="py-2.5 px-2 font-semibold text-stone-600">
+                          {formatPaise(item.base_price_paise)}
+                        </td>
+                        <td className="py-2.5 px-2 font-extrabold text-[#FF6B4A]">
+                          {formatPaise(item.display_price_paise)}
+                        </td>
+                        <td className="py-2.5 px-2 text-stone-500">
+                          {item.prep_time_minutes}m
+                        </td>
+                        <td className="py-2.5 px-2 font-bold text-[#141414]">
+                          {item.total_orders_count}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         )}
 
         {/* ================================================================ */}
-        {/* TAB 2: OWNER ANALYTICS (BEST SELLERS & PEAK HOURS — SAMPLE DATA) */}
+        {/* VIEW 4: EXECUTIVE ANALYTICS (SAMPLE DATA LABELED)                */}
         {/* ================================================================ */}
         {activeTab === "analytics" && (
           <div className="space-y-6">
-            {/* Mandatory Sample Data Disclosure */}
-            <div className="bg-white rounded-[24px] p-4 border border-stone-200/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="bg-white rounded-2xl p-4 border border-stone-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2 font-semibold text-stone-600">
                 <Sparkles className="w-4 h-4 text-[#FF6B4A]" />
                 <span>
                   <strong className="px-2.5 py-0.5 rounded-full bg-[#141414] text-white text-[10px]">
                     Sample data
                   </strong>{" "}
-                  Seeded historical records are labeled as Sample data alongside your live orders.
+                  Seeded historical metrics are badged as Sample data alongside your live orders.
                 </span>
               </div>
               {analytics?.summary && (
@@ -522,14 +674,13 @@ export const ManagerFloorView: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Best Sellers Chart */}
-              <div className="bg-white rounded-[32px] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-4">
+              <div className="bg-white rounded-3xl p-6 shadow-xs border border-stone-200/80 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-base font-extrabold text-[#141414]">
                       Best-Selling Dishes
                     </h3>
-                    <p className="text-xs text-stone-400">Total units ordered across tables</p>
+                    <p className="text-xs text-stone-400">Units ordered across tables</p>
                   </div>
                   <span className="px-3 py-1 rounded-full bg-[#F7F5F2] text-stone-600 text-[10px] font-extrabold">
                     Sample data
@@ -566,14 +717,13 @@ export const ManagerFloorView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Peak Hours Chart */}
-              <div className="bg-white rounded-[32px] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-4">
+              <div className="bg-white rounded-3xl p-6 shadow-xs border border-stone-200/80 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-base font-extrabold text-[#141414]">
                       Peak Dining Hours
                     </h3>
-                    <p className="text-xs text-stone-400">Hourly order distribution</p>
+                    <p className="text-xs text-stone-400">Hourly order volume</p>
                   </div>
                   <span className="px-3 py-1 rounded-full bg-[#F7F5F2] text-stone-600 text-[10px] font-extrabold">
                     Sample data
@@ -604,17 +754,17 @@ export const ManagerFloorView: React.FC = () => {
         )}
 
         {/* ================================================================ */}
-        {/* TAB 3: RETAINED CUSTOMERS & DPDP REGISTRY                        */}
+        {/* VIEW 5: RETAINED CUSTOMERS & DPDP REGISTRY                       */}
         {/* ================================================================ */}
         {activeTab === "customers" && (
-          <div className="bg-white rounded-[32px] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-4">
+          <div className="bg-white rounded-3xl p-6 shadow-xs border border-stone-200/80 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-lg font-extrabold text-[#141414]">
+                <h3 className="text-base font-extrabold text-[#141414]">
                   Retained Customers & DPDP Act Consent Registry
                 </h3>
                 <p className="text-xs text-stone-400">
-                  Guests who verified their WhatsApp number for the 5% discount
+                  Verified guests who opted in via the 5% mobile discount
                 </p>
               </div>
               <span className="px-3 py-1 rounded-full bg-[#F7F5F2] text-stone-600 text-[10px] font-extrabold">
@@ -625,7 +775,7 @@ export const ManagerFloorView: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="border-b border-stone-200/80 text-stone-400">
+                  <tr className="border-b border-stone-200 text-stone-400">
                     <th className="py-3 px-3">Guest Name</th>
                     <th className="py-3 px-3">WhatsApp Phone</th>
                     <th className="py-3 px-3">DPDP Consent</th>
@@ -674,25 +824,25 @@ export const ManagerFloorView: React.FC = () => {
         )}
 
         {/* ================================================================ */}
-        {/* TAB 4: READ-ONLY OWNER SETTLEMENT REPORT                         */}
+        {/* VIEW 6: READ-ONLY OWNER SETTLEMENT REPORT                        */}
         {/* ================================================================ */}
         {activeTab === "settlements" && (
           <div className="space-y-5">
             {settlementError ? (
-              <div className="bg-white rounded-[32px] p-10 text-center space-y-3 shadow-[0_8px_30px_rgba(0,0,0,0.03)]">
+              <div className="bg-white rounded-3xl p-10 text-center space-y-3 border border-stone-200/80">
                 <Lock className="w-8 h-8 text-[#FF6B4A] mx-auto" />
                 <h3 className="text-base font-extrabold text-[#141414]">
                   Restaurant Owner Role Required
                 </h3>
                 <p className="text-xs text-stone-400 max-w-md mx-auto">
-                  Switch to the <strong>Restaurant Admin Portal (/owner)</strong> via the bottom-right Portal Switcher pill to view the read-only Owner Settlement Report.
+                  Switch to <strong>Restaurant Admin (/owner)</strong> in the left sidebar under "Switch Role Portal" to view the read-only Owner Settlement Report.
                 </p>
               </div>
             ) : (
               <>
                 {settlements?.summary_paise && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-white rounded-[28px] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
+                    <div className="bg-white rounded-3xl p-5 border border-stone-200/80">
                       <div className="text-xs text-stone-400 font-medium">
                         Gross Customer Collections
                       </div>
@@ -700,7 +850,7 @@ export const ManagerFloorView: React.FC = () => {
                         {formatPaise(settlements.summary_paise.total_gross_paise)}
                       </div>
                     </div>
-                    <div className="bg-white rounded-[28px] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
+                    <div className="bg-white rounded-3xl p-5 border border-stone-200/80">
                       <div className="text-xs text-stone-400 font-medium">
                         5% Verified Discounts
                       </div>
@@ -708,7 +858,7 @@ export const ManagerFloorView: React.FC = () => {
                         -{formatPaise(settlements.summary_paise.total_discount_paise)}
                       </div>
                     </div>
-                    <div className="bg-white rounded-[28px] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
+                    <div className="bg-white rounded-3xl p-5 border border-stone-200/80">
                       <div className="text-xs text-stone-400 font-medium">
                         GST (on Subtotal - Discount)
                       </div>
@@ -716,7 +866,7 @@ export const ManagerFloorView: React.FC = () => {
                         {formatPaise(settlements.summary_paise.total_tax_paise)}
                       </div>
                     </div>
-                    <div className="bg-[#141414] text-white rounded-[28px] p-5 shadow-lg">
+                    <div className="bg-[#141414] text-white rounded-3xl p-5 shadow-lg">
                       <div className="text-xs text-stone-400 font-medium">
                         Net Restaurant Settlement
                       </div>
@@ -727,7 +877,7 @@ export const ManagerFloorView: React.FC = () => {
                   </div>
                 )}
 
-                <div className="bg-white rounded-[32px] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-4">
+                <div className="bg-white rounded-3xl p-6 shadow-xs border border-stone-200/80 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <h3 className="text-base font-extrabold text-[#141414] flex items-center gap-2">
@@ -748,7 +898,7 @@ export const ManagerFloorView: React.FC = () => {
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead>
-                        <tr className="border-b border-stone-200/80 text-stone-400">
+                        <tr className="border-b border-stone-200 text-stone-400">
                           <th className="py-3 px-3">Table</th>
                           <th className="py-3 px-3">Base Food Value</th>
                           <th className="py-3 px-3">5% Discount</th>
@@ -804,7 +954,26 @@ export const ManagerFloorView: React.FC = () => {
             )}
           </div>
         )}
+
+        {/* ================================================================ */}
+        {/* VIEW 7: PHASE 2 CCTV VISION ROADMAP                              */}
+        {/* ================================================================ */}
+        {activeTab === "cctv" && (
+          <div className="bg-white rounded-3xl p-8 shadow-xs border border-stone-200/80 space-y-4">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FF6B4A]/15 text-[#FF6B4A] text-xs font-extrabold uppercase">
+              <Camera className="w-3.5 h-3.5" />
+              Phase 2 Hardware Vision Roadmap
+            </span>
+            <h3 className="text-xl font-extrabold text-[#141414]">
+              Automated Overhead CCTV Occupancy & Table Turn SLA
+            </h3>
+            <p className="text-xs text-stone-500 leading-relaxed max-w-2xl">
+              In Phase 2, existing overhead RTSP cameras connect to our edge worker to automatically detect guest seating count (`source="cctv"`) and trigger Amber idle alerts if no order is placed within threshold. Use the{" "}
+              <strong className="text-[#141414]">Simulate CCTV Seating</strong> button in the left sidebar to test this workflow live today.
+            </p>
+          </div>
+        )}
       </div>
-    </div>
+    </InternalPortalLayout>
   );
 };

@@ -2,15 +2,19 @@ import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
-  Crown,
+  FileSpreadsheet,
+  LayoutDashboard,
   Palette,
   Percent,
   Plus,
   Save,
   Sliders,
   Wallet,
-  X,
 } from "lucide-react";
+import {
+  InternalPortalLayout,
+  SidebarMenuItem,
+} from "@/components/InternalPortalLayout";
 import { apiFetch } from "@/lib/api";
 import { applyTenantThemeVars, formatPaise } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
@@ -18,6 +22,7 @@ import { useAppStore } from "@/store/useAppStore";
 export const SuperAdminView: React.FC = () => {
   const queryClient = useQueryClient();
   const { activeRestaurantId, setActiveRestaurantId } = useAppStore();
+  const [activeMenuId, setActiveMenuId] = useState<string>("overview");
 
   const { data: overview } = useQuery<any>({
     queryKey: ["super-admin-overview"],
@@ -43,13 +48,16 @@ export const SuperAdminView: React.FC = () => {
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
-  const [createOpen, setCreateOpen] = useState(false);
   const [newSlug, setNewSlug] = useState("royal-haveli-restro");
   const [newName, setNewName] = useState("Royal Haveli Heritage Restro");
-  const [newTagline, setNewTagline] = useState("Fine Rajasthani Thali & Courtyard Dining");
+  const [newTagline, setNewTagline] = useState(
+    "Fine Rajasthani Thali & Courtyard Dining"
+  );
   const [newPrimary, setNewPrimary] = useState("#FF6B4A");
   const [newAccent, setNewAccent] = useState("#141414");
-  const [newModel, setNewModel] = useState<"one_time_amc" | "profit_share">("profit_share");
+  const [newModel, setNewModel] = useState<"one_time_amc" | "profit_share">(
+    "profit_share"
+  );
   const [newMarkupBps, setNewMarkupBps] = useState(1000);
   const [createBusy, setCreateBusy] = useState(false);
 
@@ -66,6 +74,31 @@ export const SuperAdminView: React.FC = () => {
     }
   }, [restaurant]);
 
+  const sidebarItems: SidebarMenuItem[] = [
+    {
+      id: "overview",
+      label: "Platform Overview",
+      icon: <LayoutDashboard className="w-4 h-4" />,
+      badge: overview?.tenants?.length || 2,
+    },
+    {
+      id: "config",
+      label: "Branding & Profit-Share",
+      icon: <Sliders className="w-4 h-4" />,
+    },
+    {
+      id: "ledger",
+      label: "Global Paise Ledger",
+      icon: <FileSpreadsheet className="w-4 h-4" />,
+      badge: overview?.recent_ledger?.length,
+    },
+    {
+      id: "onboard",
+      label: "Onboard New Client",
+      icon: <Plus className="w-4 h-4" />,
+    },
+  ];
+
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaveBusy(true);
@@ -80,7 +113,8 @@ export const SuperAdminView: React.FC = () => {
             primary_color: primaryColor,
             accent_color: accentColor,
             bg_color: bgColor,
-            logo_url: restaurant?.theme?.logo_url || "/images/logos/shree-ram-dhaba.svg",
+            logo_url:
+              restaurant?.theme?.logo_url || "/images/logos/shree-ram-dhaba.svg",
           },
           billing_model: billingModel,
           markup_bps: billingModel === "profit_share" ? markupBps : 0,
@@ -120,8 +154,8 @@ export const SuperAdminView: React.FC = () => {
           table_count: 6,
         }),
       });
-      setCreateOpen(false);
       setActiveRestaurantId(created.restaurant_id);
+      setActiveMenuId("config");
       queryClient.invalidateQueries({ queryKey: ["restaurants"] });
       queryClient.invalidateQueries({ queryKey: ["super-admin-overview"] });
     } catch (err: any) {
@@ -132,40 +166,28 @@ export const SuperAdminView: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#F7F5F2] text-[#141414] pb-24">
-      {/* Standalone Super Admin Top Bar */}
-      <header className="bg-white border-b border-stone-200/80 px-6 py-4 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-[#141414] text-white flex items-center justify-center shadow-sm">
-              <Crown className="w-5 h-5 text-[#FF6B4A]" />
-            </div>
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-wider text-stone-400">
-                RetAI Platform HQ • Super Admin Portal (/super-admin)
-              </div>
-              <h1 className="text-xl font-extrabold text-[#141414] tracking-tight">
-                Multi-Tenant Command{" "}
-                <span className="font-light text-stone-400">& Profit-Share Engine</span>
-              </h1>
-            </div>
-          </div>
-
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="px-5 py-2.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white text-xs font-bold flex items-center gap-1.5 shadow-md transition"
-          >
-            <Plus className="w-4 h-4" />
-            Onboard New White-Label Restaurant
-          </button>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
-        {/* Global KPI Row */}
-        {overview && (
+    <InternalPortalLayout
+      portalTitle="Super Admin Command Center"
+      portalSubtitle="Multi-tenant white-label management, hidden profit-share formula & global paise ledger"
+      portalRoleBadge="SUPER ADMIN"
+      menuItems={sidebarItems}
+      activeMenuId={activeMenuId}
+      onSelectMenu={setActiveMenuId}
+      headerActions={
+        <button
+          onClick={() => setActiveMenuId("onboard")}
+          className="px-4 py-2 rounded-xl bg-[#141414] hover:bg-[#FF6B4A] text-white text-xs font-bold flex items-center gap-1.5 transition"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          New Tenant
+        </button>
+      }
+    >
+      <div className="space-y-6">
+        {/* Global KPI Row (Shown on Overview & Ledger) */}
+        {(activeMenuId === "overview" || activeMenuId === "ledger") && overview && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white rounded-[28px] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.03)] border border-stone-200/60">
+            <div className="bg-white rounded-3xl p-5 shadow-xs border border-stone-200/80">
               <div className="text-xs text-stone-400 font-medium">
                 Global Platform GMV
               </div>
@@ -177,7 +199,7 @@ export const SuperAdminView: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-[#141414] text-white rounded-[28px] p-5 shadow-lg">
+            <div className="bg-[#141414] text-white rounded-3xl p-5 shadow-lg">
               <div className="text-xs text-stone-400 font-medium">
                 Platform Hidden Profit-Share Earned
               </div>
@@ -189,7 +211,7 @@ export const SuperAdminView: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-[28px] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.03)] border border-stone-200/60">
+            <div className="bg-white rounded-3xl p-5 shadow-xs border border-stone-200/80">
               <div className="text-xs text-stone-400 font-medium">
                 One-Time Setup Licenses
               </div>
@@ -201,7 +223,7 @@ export const SuperAdminView: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-[28px] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.03)] border border-stone-200/60">
+            <div className="bg-white rounded-3xl p-5 shadow-xs border border-stone-200/80">
               <div className="text-xs text-stone-400 font-medium">
                 Annual AMC Recurring
               </div>
@@ -215,16 +237,96 @@ export const SuperAdminView: React.FC = () => {
           </div>
         )}
 
-        {/* Main Grid: White-Label Configurator + Tenant Portfolio */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* VIEW 1: PLATFORM OVERVIEW & TENANT PORTFOLIO */}
+        {activeMenuId === "overview" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {(overview?.tenants || []).map((t: any) => {
+              const isSelected = t.restaurant_id === activeRestaurantId;
+              return (
+                <div
+                  key={t.restaurant_id}
+                  className={`bg-white rounded-3xl p-6 shadow-xs border-2 transition space-y-4 ${
+                    isSelected ? "border-[#FF6B4A]" : "border-stone-200/80"
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-[#141414] text-white flex items-center justify-center">
+                        <Building2 className="w-5 h-5 text-[#FF6B4A]" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-extrabold text-[#141414]">
+                          {t.name}
+                        </h3>
+                        <p className="text-xs font-mono text-stone-400">
+                          ID: {t.restaurant_id}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-extrabold ${
+                        t.billing_model === "profit_share"
+                          ? "bg-[#FF6B4A]/15 text-[#FF6B4A]"
+                          : "bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      {t.billing_model === "profit_share"
+                        ? `${(t.markup_bps / 100).toFixed(0)}% Profit-Share`
+                        : "One-Time + AMC"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 p-4 rounded-2xl bg-[#FAF8F6] text-xs">
+                    <div>
+                      <div className="text-stone-400">Gross GMV</div>
+                      <div className="text-sm font-extrabold text-[#141414] mt-0.5">
+                        {formatPaise(t.gross_gmv_paise)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-stone-400">Restaurant Net</div>
+                      <div className="text-sm font-extrabold text-emerald-700 mt-0.5">
+                        {formatPaise(t.restaurant_net_paise)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-stone-400">Platform Cut</div>
+                      <div className="text-sm font-extrabold text-[#FF6B4A] mt-0.5">
+                        {formatPaise(t.platform_hidden_markup_paise)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-xs text-stone-400">
+                      Settled Orders: <strong>{t.orders_settled_count}</strong>
+                    </span>
+                    <button
+                      onClick={() => {
+                        setActiveRestaurantId(t.restaurant_id);
+                        setActiveMenuId("config");
+                      }}
+                      className="px-4 py-2 rounded-xl bg-[#141414] hover:bg-[#FF6B4A] text-white text-xs font-bold transition"
+                    >
+                      Configure Branding & Formula →
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* VIEW 2: WHITE-LABEL BRANDING & PROFIT-SHARE FORMULA CONFIGURATOR */}
+        {activeMenuId === "config" && (
           <form
             onSubmit={handleSaveConfig}
-            className="lg:col-span-2 bg-white rounded-[32px] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-5"
+            className="bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-stone-200/80 space-y-6 max-w-4xl"
           >
             <div className="flex items-center justify-between border-b border-stone-100 pb-4">
               <div>
-                <h2 className="text-base font-extrabold text-[#141414] flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-[#FF6B4A]" />
+                <h2 className="text-lg font-extrabold text-[#141414] flex items-center gap-2">
+                  <Sliders className="w-5 h-5 text-[#FF6B4A]" />
                   Configure Tenant:{" "}
                   <span className="text-[#FF6B4A]">{restaurant?.name}</span>
                 </h2>
@@ -246,7 +348,7 @@ export const SuperAdminView: React.FC = () => {
                   type="text"
                   value={nameInput}
                   onChange={(e) => setNameInput(e.target.value)}
-                  className="w-full bg-[#F7F5F2] rounded-2xl px-4 py-3 font-bold text-[#141414] focus:outline-none"
+                  className="w-full bg-[#F7F5F2] rounded-xl px-4 py-3 font-bold text-[#141414] focus:outline-none"
                 />
               </div>
               <div>
@@ -257,18 +359,17 @@ export const SuperAdminView: React.FC = () => {
                   type="text"
                   value={taglineInput}
                   onChange={(e) => setTaglineInput(e.target.value)}
-                  className="w-full bg-[#F7F5F2] rounded-2xl px-4 py-3 font-bold text-[#141414] focus:outline-none"
+                  className="w-full bg-[#F7F5F2] rounded-xl px-4 py-3 font-bold text-[#141414] focus:outline-none"
                 />
               </div>
             </div>
 
-            {/* Brand Colors & Threshold */}
-            <div className="p-4 rounded-2xl bg-[#FAF8F6] border border-stone-200/60 space-y-3">
+            <div className="p-5 rounded-2xl bg-[#FAF8F6] border border-stone-200/60 space-y-3">
               <div className="text-xs font-extrabold text-[#141414] flex items-center gap-1.5">
                 <Palette className="w-4 h-4 text-[#FF6B4A]" />
                 White-Label Theme Colors & Idle Amber Threshold
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
                 <div>
                   <label className="block text-stone-400 mb-1">Primary Color</label>
                   <div className="flex items-center gap-2 bg-white rounded-xl p-1.5 border border-stone-200">
@@ -319,8 +420,7 @@ export const SuperAdminView: React.FC = () => {
               </div>
             </div>
 
-            {/* Dual Monetization Selector */}
-            <div className="p-4 rounded-2xl bg-[#FAF8F6] border border-stone-200/60 space-y-4">
+            <div className="p-5 rounded-2xl bg-[#FAF8F6] border border-stone-200/60 space-y-4">
               <div className="text-xs font-extrabold text-[#141414] flex items-center gap-1.5">
                 <Wallet className="w-4 h-4 text-[#FF6B4A]" />
                 Monetization Formula (Server-Side Integer Paise)
@@ -395,7 +495,7 @@ export const SuperAdminView: React.FC = () => {
             </div>
 
             {saveToast && (
-              <div className="p-3 rounded-2xl bg-emerald-50 text-emerald-700 text-xs font-bold">
+              <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold">
                 {saveToast}
               </div>
             )}
@@ -403,168 +503,107 @@ export const SuperAdminView: React.FC = () => {
             <button
               type="submit"
               disabled={saveBusy}
-              className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition"
+              className="px-8 py-3.5 rounded-xl bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition"
             >
               <Save className="w-4 h-4" />
               <span>
-                {saveBusy ? "Saving Configuration..." : "Save Tenant Branding & Pricing Formula"}
+                {saveBusy
+                  ? "Saving Configuration..."
+                  : "Save Tenant Branding & Pricing Formula"}
               </span>
             </button>
           </form>
+        )}
 
-          {/* Right Col: Onboarded Tenants */}
-          <div className="bg-white rounded-[32px] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-4">
-            <h3 className="text-base font-extrabold text-[#141414] flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-[#FF6B4A]" />
-              Onboarded Tenants
-            </h3>
-
-            <div className="space-y-3">
-              {(overview?.tenants || []).map((t: any) => {
-                const isSelected = t.restaurant_id === activeRestaurantId;
-                return (
-                  <div
-                    key={t.restaurant_id}
-                    onClick={() => setActiveRestaurantId(t.restaurant_id)}
-                    className={`p-4 rounded-2xl border cursor-pointer transition space-y-2.5 ${
-                      isSelected
-                        ? "bg-[#141414] text-white border-[#141414] shadow-md"
-                        : "bg-[#FAF8F6] text-[#141414] border-stone-200/80 hover:bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-extrabold text-sm">{t.name}</span>
-                      <span
-                        className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold ${
-                          isSelected
-                            ? "bg-[#FF6B4A] text-white"
-                            : "bg-white text-stone-600"
-                        }`}
-                      >
-                        {t.billing_model === "profit_share"
-                          ? `${(t.markup_bps / 100).toFixed(0)}% Profit-Share`
-                          : "One-Time + AMC"}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-[11px] pt-2 border-t border-current/10">
-                      <div>
-                        <div className="opacity-60">Gross GMV</div>
-                        <div className="font-extrabold">
-                          {formatPaise(t.gross_gmv_paise)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="opacity-60">Restro Net</div>
-                        <div className="font-extrabold">
-                          {formatPaise(t.restaurant_net_paise)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="opacity-60">Your Cut</div>
-                        <div className="font-extrabold text-[#FF6B4A]">
-                          {formatPaise(t.platform_hidden_markup_paise)}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+        {/* VIEW 3: GLOBAL PAISE SETTLEMENT LEDGER */}
+        {(activeMenuId === "ledger" || activeMenuId === "overview") && (
+          <div className="bg-white rounded-3xl p-6 shadow-xs border border-stone-200/80 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-extrabold text-[#141414]">
+                  Global Server-Side Paise Ledger
+                </h3>
+                <p className="text-xs text-stone-400">
+                  Tracks Base Menu Value, Display Subtotal, 5% Discount, GST on (Subtotal - Discount), and Platform Profit Share
+                </p>
+              </div>
+              <span className="px-3 py-1 rounded-full bg-[#F7F5F2] text-stone-600 text-[10px] font-extrabold">
+                Sample data + Live Settlements
+              </span>
             </div>
-          </div>
-        </div>
 
-        {/* Global Cross-Tenant Ledger */}
-        <div className="bg-white rounded-[32px] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.03)] border border-stone-200/60 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-base font-extrabold text-[#141414]">
-                Global Server-Side Paise Ledger
-              </h3>
-              <p className="text-xs text-stone-400">
-                Tracks Base Menu Value, Display Subtotal, 5% Discount, GST on (Subtotal - Discount), and Platform Profit Share
-              </p>
-            </div>
-            <span className="px-3 py-1 rounded-full bg-[#F7F5F2] text-stone-600 text-[10px] font-extrabold">
-              Sample data + Live Settlements
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-stone-200/80 text-stone-400">
-                  <th className="py-3 px-3">Tenant</th>
-                  <th className="py-3 px-3">Table</th>
-                  <th className="py-3 px-3">Model</th>
-                  <th className="py-3 px-3">Base Value</th>
-                  <th className="py-3 px-3">Display Subtotal</th>
-                  <th className="py-3 px-3">5% Discount</th>
-                  <th className="py-3 px-3">GST</th>
-                  <th className="py-3 px-3">Gross Bill</th>
-                  <th className="py-3 px-3">Platform Cut</th>
-                  <th className="py-3 px-3">Restro Net</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {(overview?.recent_ledger || []).map((e: any) => (
-                  <tr key={e.id} className="hover:bg-[#FAF8F6]">
-                    <td className="py-3 px-3 font-extrabold text-[#141414]">
-                      {e.restaurant_id}
-                    </td>
-                    <td className="py-3 px-3 font-semibold">Table #{e.table_number}</td>
-                    <td className="py-3 px-3">
-                      <span className="px-2 py-0.5 rounded-full bg-[#F7F5F2] text-stone-600 text-[10px] font-bold">
-                        {e.billing_model}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-stone-500">
-                      {formatPaise(e.subtotal_base_paise)}
-                    </td>
-                    <td className="py-3 px-3 text-stone-700 font-semibold">
-                      {formatPaise(e.subtotal_display_paise)}
-                    </td>
-                    <td className="py-3 px-3 text-emerald-600 font-semibold">
-                      -{formatPaise(e.customer_discount_paise)}
-                    </td>
-                    <td className="py-3 px-3 text-stone-500">
-                      {formatPaise(e.tax_paise)}
-                    </td>
-                    <td className="py-3 px-3 font-extrabold text-[#141414]">
-                      {formatPaise(e.gross_bill_paise)}
-                    </td>
-                    <td className="py-3 px-3 font-extrabold text-[#FF6B4A]">
-                      +{formatPaise(e.platform_hidden_markup_paise)}
-                    </td>
-                    <td className="py-3 px-3 font-extrabold text-emerald-700">
-                      {formatPaise(e.restaurant_net_paise)}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-stone-200 text-stone-400">
+                    <th className="py-3 px-3">Tenant</th>
+                    <th className="py-3 px-3">Table</th>
+                    <th className="py-3 px-3">Model</th>
+                    <th className="py-3 px-3">Base Value</th>
+                    <th className="py-3 px-3">Display Subtotal</th>
+                    <th className="py-3 px-3">5% Discount</th>
+                    <th className="py-3 px-3">GST</th>
+                    <th className="py-3 px-3">Gross Bill</th>
+                    <th className="py-3 px-3">Platform Cut</th>
+                    <th className="py-3 px-3">Restro Net</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {(overview?.recent_ledger || []).map((e: any) => (
+                    <tr key={e.id} className="hover:bg-[#FAF8F6]">
+                      <td className="py-3 px-3 font-extrabold text-[#141414]">
+                        {e.restaurant_id}
+                      </td>
+                      <td className="py-3 px-3 font-semibold">
+                        Table #{e.table_number}
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="px-2 py-0.5 rounded-full bg-[#F7F5F2] text-stone-600 text-[10px] font-bold">
+                          {e.billing_model}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-stone-500">
+                        {formatPaise(e.subtotal_base_paise)}
+                      </td>
+                      <td className="py-3 px-3 text-stone-700 font-semibold">
+                        {formatPaise(e.subtotal_display_paise)}
+                      </td>
+                      <td className="py-3 px-3 text-emerald-600 font-semibold">
+                        -{formatPaise(e.customer_discount_paise)}
+                      </td>
+                      <td className="py-3 px-3 text-stone-500">
+                        {formatPaise(e.tax_paise)}
+                      </td>
+                      <td className="py-3 px-3 font-extrabold text-[#141414]">
+                        {formatPaise(e.gross_bill_paise)}
+                      </td>
+                      <td className="py-3 px-3 font-extrabold text-[#FF6B4A]">
+                        +{formatPaise(e.platform_hidden_markup_paise)}
+                      </td>
+                      <td className="py-3 px-3 font-extrabold text-emerald-700">
+                        {formatPaise(e.restaurant_net_paise)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      </div>
+        )}
 
-      {/* Modal: Onboard New Tenant */}
-      {createOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+        {/* VIEW 4: ONBOARD NEW WHITE-LABEL RESTAURANT CLIENT */}
+        {activeMenuId === "onboard" && (
           <form
             onSubmit={handleCreateTenant}
-            className="bg-white rounded-[36px] max-w-md w-full p-6 shadow-2xl space-y-4 text-xs"
+            className="bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-stone-200/80 max-w-xl space-y-4 text-xs"
           >
-            <div className="flex items-center justify-between">
+            <div>
               <h3 className="text-lg font-extrabold text-[#141414]">
-                Onboard New Restaurant Client
+                Onboard New White-Label Restaurant Client
               </h3>
-              <button
-                type="button"
-                onClick={() => setCreateOpen(false)}
-                className="w-9 h-9 rounded-full bg-[#F7F5F2] flex items-center justify-center text-stone-500"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <p className="text-xs text-stone-400">
+                Creates a new multi-tenant restaurant with tables, QR tokens, and starter 3D menu items.
+              </p>
             </div>
 
             <div>
@@ -576,7 +615,7 @@ export const SuperAdminView: React.FC = () => {
                 required
                 value={newSlug}
                 onChange={(e) => setNewSlug(e.target.value)}
-                className="w-full bg-[#F7F5F2] rounded-2xl px-4 py-2.5 font-mono font-bold text-[#141414]"
+                className="w-full bg-[#F7F5F2] rounded-xl px-4 py-2.5 font-mono font-bold text-[#141414]"
               />
             </div>
 
@@ -589,7 +628,7 @@ export const SuperAdminView: React.FC = () => {
                 required
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                className="w-full bg-[#F7F5F2] rounded-2xl px-4 py-2.5 font-bold text-[#141414]"
+                className="w-full bg-[#F7F5F2] rounded-xl px-4 py-2.5 font-bold text-[#141414]"
               />
             </div>
 
@@ -599,7 +638,7 @@ export const SuperAdminView: React.FC = () => {
                 type="text"
                 value={newTagline}
                 onChange={(e) => setNewTagline(e.target.value)}
-                className="w-full bg-[#F7F5F2] rounded-2xl px-4 py-2.5 font-bold text-[#141414]"
+                className="w-full bg-[#F7F5F2] rounded-xl px-4 py-2.5 font-bold text-[#141414]"
               />
             </div>
 
@@ -611,9 +650,9 @@ export const SuperAdminView: React.FC = () => {
                 <select
                   value={newModel}
                   onChange={(e) => setNewModel(e.target.value as any)}
-                  className="w-full bg-[#F7F5F2] rounded-2xl px-3 py-2.5 font-bold text-[#141414]"
+                  className="w-full bg-[#F7F5F2] rounded-xl px-3 py-2.5 font-bold text-[#141414]"
                 >
-                  <option value="profit_share">Profit-Share</option>
+                  <option value="profit_share">Profit-Share (Hidden Markup)</option>
                   <option value="one_time_amc">One-Time + AMC</option>
                 </select>
               </div>
@@ -625,7 +664,7 @@ export const SuperAdminView: React.FC = () => {
                   type="number"
                   value={newMarkupBps}
                   onChange={(e) => setNewMarkupBps(Number(e.target.value))}
-                  className="w-full bg-[#F7F5F2] rounded-2xl px-3 py-2.5 font-bold text-[#141414]"
+                  className="w-full bg-[#F7F5F2] rounded-xl px-3 py-2.5 font-bold text-[#141414]"
                 />
               </div>
             </div>
@@ -633,13 +672,13 @@ export const SuperAdminView: React.FC = () => {
             <button
               type="submit"
               disabled={createBusy}
-              className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold transition"
+              className="w-full py-3.5 rounded-xl bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold transition"
             >
               {createBusy ? "Onboarding..." : "Create Tenant Live"}
             </button>
           </form>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </InternalPortalLayout>
   );
 };
