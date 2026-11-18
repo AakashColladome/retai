@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     ANTHROPIC_MODEL: str = "claude-haiku-5-5"
     ANTHROPIC_UPSELL_MODEL: str = "claude-sonnet-5-5"
 
+    ELEVENLABS_API_KEY: str = ""
+    ELEVENLABS_VOICE_ID: str = "RABOvaPec1ymXz02oDQi"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

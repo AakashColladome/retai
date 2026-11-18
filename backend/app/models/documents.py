@@ -15,6 +15,13 @@ class ThemeConfig(BaseModel):
     logo_url: str = "/images/logos/shree-ram-dhaba.svg"
 
 
+class FloorPin(BaseModel):
+    pin_type: Literal["washroom", "handwash", "kitchen", "entrance", "cashier"]
+    label: str
+    x_pct: int = 80
+    y_pct: int = 20
+
+
 class FacilitiesInfo(BaseModel):
     restroom_directions: str = "Rear Left Corridor — Separate Gents, Ladies & Accessible Washrooms (Sanitized every 30 mins)"
     handwash_station: str = "Warm water brass basin near Main Courtyard pillar #3"
@@ -24,6 +31,47 @@ class FacilitiesInfo(BaseModel):
     hygiene_note: str = "FSSAI 5-Star Hygiene Rated Kitchen • RO Mineral Water • Live Open Tandoor"
 
 
+DEFAULT_RBAC = {
+    "manager": {
+        "floor_map_view": True,
+        "floor_map_edit": True,
+        "menu_view": True,
+        "menu_edit": True,
+        "discounts_edit": True,
+        "orders_view": True,
+        "analytics_view": True,
+        "settlements_view": False,
+    },
+    "kitchen": {
+        "floor_map_view": False,
+        "floor_map_edit": False,
+        "menu_view": True,
+        "menu_edit": False,
+        "discounts_edit": False,
+        "orders_view": True,
+        "analytics_view": False,
+        "settlements_view": False,
+    },
+    "waiter": {
+        "floor_map_view": True,
+        "floor_map_edit": False,
+        "menu_view": True,
+        "menu_edit": False,
+        "discounts_edit": False,
+        "orders_view": True,
+        "analytics_view": False,
+        "settlements_view": False,
+    },
+}
+
+DEFAULT_FLOOR_PINS = [
+    FloorPin(pin_type="washroom", label="Gents & Ladies Washroom", x_pct=86, y_pct=16),
+    FloorPin(pin_type="handwash", label="Warm Water Handwash Basin", x_pct=72, y_pct=16),
+    FloorPin(pin_type="kitchen", label="Live Tandoor & Handi Kitchen", x_pct=86, y_pct=78),
+    FloorPin(pin_type="entrance", label="Main Welcome Entrance", x_pct=14, y_pct=84),
+]
+
+
 class Restaurant(Document):
     restaurant_id: Indexed(str, unique=True)
     slug: Indexed(str, unique=True)
@@ -31,13 +79,17 @@ class Restaurant(Document):
     tagline: str
     description: str
     facilities_info: FacilitiesInfo = Field(default_factory=FacilitiesInfo)
+    floor_pins: List[FloorPin] = Field(default_factory=lambda: list(DEFAULT_FLOOR_PINS))
+    rbac_permissions: Dict[str, Dict[str, bool]] = Field(default_factory=lambda: dict(DEFAULT_RBAC))
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
     billing_model: Literal["one_time_amc", "profit_share"] = "profit_share"
-    markup_bps: int = 800  # 800 bps = 8.00% hidden menu markup when billing_model == "profit_share"
-    one_time_fee_paise: int = 4500000  # ₹45,000 in paise
-    amc_fee_paise: int = 1200000  # ₹12,000/yr in paise
+    markup_bps: int = 800  # 800 bps = 8.00% hidden platform markup (Visible ONLY to super_admin)
+    one_time_fee_paise: int = 4500000
+    amc_fee_paise: int = 1200000
+    phone_discount_bps: int = 500  # 500 bps = 5% mobile verification discount (Configurable by Owner/Manager)
+    google_review_discount_bps: int = 200  # 200 bps = +2% Google Review discount (Configurable by Owner/Manager)
     gst_bps: int = 500  # 500 bps = 5.00% GST
-    amber_threshold_seconds: int = 60  # Configurable: default 900s (15m) in prod, 60s (1m) in demo
+    amber_threshold_seconds: int = 60
     created_at: datetime = Field(default_factory=utc_now)
 
     class Settings:
@@ -45,7 +97,7 @@ class Restaurant(Document):
 
 
 class User(Document):
-    restaurant_id: Indexed(str)  # "global" for super_admin, tenant restaurant_id for staff
+    restaurant_id: Indexed(str)
     name: str
     email: Indexed(str, unique=True)
     password_hash: str
@@ -63,6 +115,8 @@ class Table(Document):
     label: str
     capacity: int = 4
     zone: str = "Main Hall"
+    x_pct: int = 25
+    y_pct: int = 35
     qr_token: Indexed(str)
     active_session_id: Optional[str] = None
 
@@ -83,6 +137,8 @@ class TableSession(Document):
     is_phone_verified: bool = False
     dpdp_consent: bool = False
     dpdp_consented_at: Optional[datetime] = None
+    is_google_reviewed: bool = False
+    google_review_rating: Optional[int] = None
     otp_code: Optional[str] = None
     occasion: Optional[str] = None
     seated_at: datetime = Field(default_factory=utc_now)
@@ -101,7 +157,7 @@ class MenuItem(Document):
     category: str
     description: str
     ingredients: List[str] = []
-    base_price_paise: int  # Integer paise (e.g. 24000 = ₹240.00)
+    base_price_paise: int
     prep_time_minutes: int = 12
     is_veg: bool = True
     spice_level: Literal["mild", "medium", "spicy", "extra_spicy"] = "medium"
@@ -136,6 +192,7 @@ class Order(Document):
     customer_id: Optional[str] = None
     customer_phone: Optional[str] = None
     is_phone_verified: bool = False
+    is_google_reviewed: bool = False
     occasion: Optional[str] = None
     items: List[OrderLineItem] = []
     status: Literal["queued", "preparing", "ready", "served", "paid"] = "queued"
@@ -143,6 +200,8 @@ class Order(Document):
     manual_prep_override_minutes: Optional[int] = None
     subtotal_paise: int = 0
     base_subtotal_paise: int = 0
+    phone_discount_paise: int = 0
+    review_discount_paise: int = 0
     discount_paise: int = 0
     taxable_amount_paise: int = 0
     tax_paise: int = 0

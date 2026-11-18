@@ -23,13 +23,16 @@ import {
   SlidersHorizontal,
   Smartphone,
   Sparkles,
+  Star,
   Tag,
   User,
   Utensils,
+  Volume2,
   Wifi,
   X,
 } from "lucide-react";
 import "@google/model-viewer";
+import { speakWithElevenLabs } from "@/components/RoleGuideBot";
 import { apiFetch } from "@/lib/api";
 import { formatPaise } from "@/lib/utils";
 import { useAppStore } from "@/store/useAppStore";
@@ -92,7 +95,7 @@ export const CustomerView: React.FC = () => {
   const [entryStep, setEntryStep] = useState<"welcome" | "app">("welcome");
   const [activeTab, setActiveTab] = useState<CustomerTab>("home");
 
-  const [guestNameInput, setGuestNameInput] = useState("Sophia Williams");
+  const [guestNameInput, setGuestNameInput] = useState("Aarav Sharma");
   const [phoneInput, setPhoneInput] = useState("9876543210");
   const [guestCountInput, setGuestCountInput] = useState(2);
   const [dpdpChecked, setDpdpChecked] = useState(true);
@@ -105,6 +108,14 @@ export const CustomerView: React.FC = () => {
   const [active3DItem, setActive3DItem] = useState<any | null>(null);
   const [facilitiesModalOpen, setFacilitiesModalOpen] = useState(false);
   const [essentialsModalOpen, setEssentialsModalOpen] = useState(false);
+
+  // "Meal Complete" -> Final Billing & Google Review Screen State
+  const [mealCompletedScreen, setMealCompletedScreen] = useState(false);
+  const [reviewStars, setReviewStars] = useState(5);
+  const [reviewText, setReviewText] = useState(
+    "Amazing food, super fast 1-tap chapati service!"
+  );
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   const [aiInput, setAiInput] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
@@ -121,6 +132,9 @@ export const CustomerView: React.FC = () => {
     queryKey: ["restaurant", activeRestaurantId],
     queryFn: () => apiFetch(`/api/restaurants/${activeRestaurantId}`),
   });
+
+  const phoneDiscountPct = (restaurant?.phone_discount_bps ?? 500) / 100;
+  const reviewDiscountPct = (restaurant?.google_review_discount_bps ?? 200) / 100;
 
   const { data: tables = [] } = useQuery<any[]>({
     queryKey: ["tables", activeRestaurantId],
@@ -148,6 +162,7 @@ export const CustomerView: React.FC = () => {
   useEffect(() => {
     setEntryStep("welcome");
     setActiveTab("home");
+    setMealCompletedScreen(false);
     setWhatsappReceipt(null);
   }, [activeRestaurantId]);
 
@@ -258,11 +273,23 @@ export const CustomerView: React.FC = () => {
     setTimeout(() => setToastMsg(null), 3500);
   };
 
+  // Trigger ElevenLabs Hindi Welcome Voice
+  const playWelcomeGreeting = (lang: "hi" | "en" = "hi") => {
+    const rName = restaurant?.name || "Shree Ram Dhaba";
+    const text =
+      lang === "hi"
+        ? `नमस्कार! आपका ${rName} में हार्दिक स्वागत है। टेबल नंबर ${selectedTableNumber} पर अपना मोबाइल नंबर वेरीफाई करके ${phoneDiscountPct} प्रतिशत की छूट पाएं, और खाना पूरा होने पर गूगल रिव्यू देकर ${reviewDiscountPct} प्रतिशत अतिरिक्त छूट पाएं!`
+        : `Namaskar and welcome to ${rName} at Table ${selectedTableNumber}! Verify your mobile number for an instant ${phoneDiscountPct}% discount, and get an extra ${reviewDiscountPct}% off with a Google Review when you complete your meal.`;
+    speakWithElevenLabs(text, lang);
+  };
+
   const handleStartVerifiedSession = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
     if (!dpdpChecked) {
-      setAuthError("Please check the DPDP consent box to unlock your 5% discount.");
+      setAuthError(
+        `Please check the DPDP consent box to unlock your ${phoneDiscountPct}% discount.`
+      );
       return;
     }
     setAuthBusy(true);
@@ -300,6 +327,7 @@ export const CustomerView: React.FC = () => {
       });
       setEntryStep("app");
       setActiveTab("home");
+      playWelcomeGreeting("hi");
       queryClient.invalidateQueries({ queryKey: ["tables", activeRestaurantId] });
     } catch (err: any) {
       setAuthError(err.message);
@@ -326,6 +354,7 @@ export const CustomerView: React.FC = () => {
       setActiveSession(sess);
       setEntryStep("app");
       setActiveTab("home");
+      playWelcomeGreeting("hi");
       queryClient.invalidateQueries({ queryKey: ["tables", activeRestaurantId] });
     } catch (err: any) {
       setAuthError(err.message);
@@ -416,8 +445,9 @@ export const CustomerView: React.FC = () => {
         }),
       });
       clearCart();
+      setMealCompletedScreen(false);
       setActiveTab("order");
-      showToast("Order sent to Kitchen! Track live prep time.");
+      showToast("Order sent to Kitchen! You can repeat chapatis/dishes anytime.");
       queryClient.invalidateQueries({ queryKey: ["session-orders"] });
       queryClient.invalidateQueries({ queryKey: ["tables", activeRestaurantId] });
     } catch (err: any) {
@@ -436,10 +466,36 @@ export const CustomerView: React.FC = () => {
           qty: 1,
         }),
       });
-      showToast(`Repeated +1 ${dishName.replace(" (3D View)", "")}`);
+      showToast(`Repeated +1 ${dishName.replace(" (3D View)", "")} — Sent to Kitchen!`);
       queryClient.invalidateQueries({ queryKey: ["session-orders"] });
     } catch (err: any) {
       alert(err.message);
+    }
+  };
+
+  // Submit Google Review on the Final Billing Screen -> Unlocks Extra +2% Off Server-Side!
+  const handleSubmitGoogleReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSession) return;
+    setReviewSubmitting(true);
+    try {
+      await apiFetch(`/api/sessions/${activeSession.session_id}/google-review`, {
+        method: "POST",
+        body: JSON.stringify({
+          qr_token: currentQrToken,
+          rating: reviewStars,
+          review_text: reviewText,
+        }),
+      });
+      confetti({ particleCount: 60, spread: 60, origin: { y: 0.65 } });
+      showToast(
+        `Thank you for your ${reviewStars}★ Google Review! Extra +${reviewDiscountPct}% discount applied!`
+      );
+      queryClient.invalidateQueries({ queryKey: ["session-orders"] });
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setReviewSubmitting(false);
     }
   };
 
@@ -489,6 +545,7 @@ export const CustomerView: React.FC = () => {
       });
       setWhatsappReceipt(res);
       setActiveSession(null);
+      setMealCompletedScreen(false);
       confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
       queryClient.invalidateQueries({ queryKey: ["tables", activeRestaurantId] });
       queryClient.invalidateQueries({ queryKey: ["session-orders"] });
@@ -501,26 +558,36 @@ export const CustomerView: React.FC = () => {
 
   const totalCartItems = cart.reduce((s, i) => s + i.qty, 0);
 
+  // Quick bread / chapati item from menu so customer can always 1-tap add hot bread
+  const breadItems = menuItems.filter(
+    (m) =>
+      m.category.toLowerCase().includes("bread") ||
+      m.name.toLowerCase().includes("naan") ||
+      m.name.toLowerCase().includes("kulcha") ||
+      m.name.toLowerCase().includes("chapati") ||
+      m.name.toLowerCase().includes("roti")
+  );
+
   // ============================================================================
   // SCREEN 1: WELCOME -> RESTAURANT NAME -> "Hello!" -> MOBILE / GUEST
   // ============================================================================
   if (entryStep === "welcome" && !whatsappReceipt) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#F9EDE8] via-[#FAF8F6] to-[#F4F1EC] flex flex-col items-center justify-center p-4 sm:p-8">
+      <div className="min-h-screen bg-gradient-to-b from-[#F9EDE8] via-[#FAF8F6] to-[#F4F1EC] flex flex-col items-center justify-center p-4 sm:p-8 font-sans">
         <div className="w-full max-w-[440px] bg-[#FAF9F6] rounded-[44px] p-7 sm:p-9 shadow-[0_24px_70px_rgba(20,20,20,0.09)] border border-white relative overflow-hidden">
-          <div className="flex items-center justify-between mb-7">
+          <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
               <div className="w-9 h-9 rounded-full bg-white shadow-xs border border-stone-200/70 flex items-center justify-center text-[#141414]">
                 <Utensils className="w-4 h-4 text-[#FF6B4A]" />
               </div>
               <div>
                 <div className="text-[10px] text-stone-400 font-medium leading-none">
-                  Seated at
+                  QR Table Detected
                 </div>
                 <select
                   value={selectedTableNumber}
                   onChange={(e) => setSelectedTableNumber(Number(e.target.value))}
-                  className="text-xs font-extrabold text-[#141414] bg-transparent focus:outline-none cursor-pointer"
+                  className="text-xs font-bold text-[#141414] bg-transparent focus:outline-none cursor-pointer"
                 >
                   {tables.map((t: any) => (
                     <option key={t.table_number} value={t.table_number}>
@@ -531,22 +598,28 @@ export const CustomerView: React.FC = () => {
               </div>
             </div>
 
-            <span className="px-3 py-1 rounded-full bg-white border border-stone-200/80 text-[11px] font-bold text-[#141414]">
-              {customerMode === "qr" ? "QR App" : "Table WebApp"}
-            </span>
+            {/* ElevenLabs Hindi/English Welcome Voice Trigger */}
+            <button
+              type="button"
+              onClick={() => playWelcomeGreeting("hi")}
+              className="px-3 py-1.5 rounded-full bg-[#141414] text-white text-[11px] font-semibold flex items-center gap-1.5 shadow-sm hover:bg-[#FF6B4A] transition"
+            >
+              <Volume2 className="w-3.5 h-3.5 text-[#9FE870]" />
+              <span>स्वागत सुनें</span>
+            </button>
           </div>
 
           <div className="mb-5">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FF6B4A]/10 text-[#FF6B4A] text-[11px] font-bold mb-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FF6B4A]/10 text-[#FF6B4A] text-[11px] font-semibold mb-2">
               <Sparkles className="w-3 h-3" />
               {restaurant?.name || "Shree Ram Dhaba"}
             </div>
 
-            <h1 className="text-[34px] leading-[1.12] tracking-tight">
-              <span className="font-extrabold text-[#141414]">Hello! </span>
-              <span className="font-light text-stone-400">Order & Eat.</span>
+            <h1 className="text-3xl leading-tight tracking-tight">
+              <span className="font-bold text-[#141414]">Hello! </span>
+              <span className="font-normal text-stone-400">Order & Eat.</span>
             </h1>
-            <p className="text-xs text-stone-500 mt-1.5 leading-relaxed">
+            <p className="text-xs text-stone-500 mt-1 leading-relaxed">
               {restaurant?.tagline ||
                 "Freshly prepared dishes served straight to your table."}
             </p>
@@ -557,11 +630,11 @@ export const CustomerView: React.FC = () => {
             className="bg-white rounded-[28px] p-5 shadow-[0_8px_30px_rgba(0,0,0,0.03)] border border-stone-100 space-y-3.5"
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-extrabold text-[#141414]">
-                Enter Mobile for 5% Off
+              <span className="text-xs font-bold text-[#141414]">
+                Verify Mobile for {phoneDiscountPct}% Off
               </span>
-              <span className="px-2.5 py-0.5 rounded-full bg-[#141414] text-white text-[10px] font-bold">
-                -5% TOTAL BILL
+              <span className="px-2.5 py-0.5 rounded-full bg-[#141414] text-white text-[10px] font-semibold">
+                -{phoneDiscountPct}% + {reviewDiscountPct}% REVIEW
               </span>
             </div>
 
@@ -575,13 +648,13 @@ export const CustomerView: React.FC = () => {
                     type="button"
                     key={n}
                     onClick={() => setGuestCountInput(n)}
-                    className={`py-2 rounded-2xl text-xs font-bold transition ${
+                    className={`py-2 rounded-2xl text-xs font-semibold transition ${
                       guestCountInput === n
                         ? "bg-[#141414] text-white shadow-xs"
                         : "bg-[#F7F5F2] text-stone-500 hover:text-[#141414]"
                     }`}
                   >
-                    {n} {n === 1 ? "Guest" : "Guests"}
+                    {n}
                   </button>
                 ))}
               </div>
@@ -597,7 +670,7 @@ export const CustomerView: React.FC = () => {
                   value={guestNameInput}
                   onChange={(e) => setGuestNameInput(e.target.value)}
                   placeholder="Your Name"
-                  className="w-full bg-[#F7F5F2] rounded-2xl px-3.5 py-2.5 text-xs font-semibold text-[#141414] focus:outline-none focus:ring-2 focus:ring-[#FF6B4A]"
+                  className="w-full bg-[#F7F5F2] rounded-2xl px-3.5 py-2.5 text-xs font-medium text-[#141414] focus:outline-none"
                 />
               </div>
               <div>
@@ -610,7 +683,7 @@ export const CustomerView: React.FC = () => {
                   value={phoneInput}
                   onChange={(e) => setPhoneInput(e.target.value)}
                   placeholder="9876543210"
-                  className="w-full bg-[#F7F5F2] rounded-2xl px-3.5 py-2.5 text-xs font-semibold text-[#141414] focus:outline-none focus:ring-2 focus:ring-[#FF6B4A]"
+                  className="w-full bg-[#F7F5F2] rounded-2xl px-3.5 py-2.5 text-xs font-medium text-[#141414] focus:outline-none"
                 />
               </div>
             </div>
@@ -624,7 +697,7 @@ export const CustomerView: React.FC = () => {
                 maxLength={6}
                 value={otpInput}
                 onChange={(e) => setOtpInput(e.target.value)}
-                className="w-full bg-[#F7F5F2] rounded-2xl px-3.5 py-2 text-xs font-bold tracking-widest text-[#141414] focus:outline-none"
+                className="w-full bg-[#F7F5F2] rounded-2xl px-3.5 py-2 text-xs font-semibold tracking-widest text-[#141414] focus:outline-none"
               />
             </div>
 
@@ -637,7 +710,7 @@ export const CustomerView: React.FC = () => {
               />
               <span className="text-[11px] text-stone-500 leading-snug">
                 I consent under the <strong className="text-[#141414]">DPDP Act</strong> to
-                receive my WhatsApp digital bill, 5% instant discount, and table offers.
+                receive my WhatsApp bill and unlock my {phoneDiscountPct}% discount.
               </span>
             </label>
 
@@ -650,9 +723,13 @@ export const CustomerView: React.FC = () => {
             <button
               type="submit"
               disabled={authBusy}
-              className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs shadow-lg transition-all flex items-center justify-center gap-2"
+              className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-semibold text-xs shadow-lg transition-all flex items-center justify-center gap-2"
             >
-              <span>{authBusy ? "Starting Session..." : "Verify & Unlock 5% Off"}</span>
+              <span>
+                {authBusy
+                  ? "Starting Session..."
+                  : `Verify & Unlock ${phoneDiscountPct}% Off`}
+              </span>
               <ChevronRight className="w-4 h-4" />
             </button>
           </form>
@@ -662,7 +739,7 @@ export const CustomerView: React.FC = () => {
               type="button"
               disabled={authBusy}
               onClick={handleContinueAsGuest}
-              className="text-xs font-bold text-stone-500 hover:text-[#141414] transition flex items-center gap-1"
+              className="text-xs font-semibold text-stone-500 hover:text-[#141414] transition flex items-center gap-1"
             >
               <span>Login as Guest</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -673,7 +750,7 @@ export const CustomerView: React.FC = () => {
               onClick={() => setFacilitiesModalOpen(true)}
               className="text-[11px] font-semibold text-[#FF6B4A] hover:underline"
             >
-              Restaurant Brief & Washrooms
+              2D Washroom & Floor Map
             </button>
           </div>
         </div>
@@ -686,21 +763,21 @@ export const CustomerView: React.FC = () => {
   // ============================================================================
   if (whatsappReceipt) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#F9EDE8] via-[#FAF8F6] to-[#F4F1EC] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-b from-[#F9EDE8] via-[#FAF8F6] to-[#F4F1EC] flex items-center justify-center p-4 font-sans">
         <div className="w-full max-w-[420px] bg-white rounded-[40px] p-7 shadow-[0_24px_70px_rgba(20,20,20,0.08)] space-y-5">
           <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
             <CheckCircle2 className="w-8 h-8" />
           </div>
 
           <div className="text-center">
-            <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
+            <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-semibold">
               Payment Successful • Session Closed
             </span>
-            <h2 className="text-2xl font-extrabold text-[#141414] mt-2">
+            <h2 className="text-2xl font-bold text-[#141414] mt-2">
               Thank You for Dining!
             </h2>
             <p className="text-xs text-stone-400 mt-1">
-              WhatsApp receipt sent to{" "}
+              WhatsApp digital bill sent to{" "}
               <strong className="text-[#141414]">
                 {whatsappReceipt.whatsapp_invoice.customer_phone}
               </strong>
@@ -713,7 +790,7 @@ export const CustomerView: React.FC = () => {
                 <span>
                   {item.qty}x {item.name.replace(" (3D View)", "")}
                 </span>
-                <span className="font-bold text-[#141414]">
+                <span className="font-semibold text-[#141414]">
                   {formatPaise(item.line_display_total_paise)}
                 </span>
               </div>
@@ -723,17 +800,23 @@ export const CustomerView: React.FC = () => {
                 <span>Subtotal</span>
                 <span>{formatPaise(whatsappReceipt.order.subtotal_paise)}</span>
               </div>
-              {whatsappReceipt.order.discount_paise > 0 && (
+              {whatsappReceipt.order.phone_discount_paise > 0 && (
                 <div className="flex justify-between text-emerald-600 font-semibold">
-                  <span>5% Verified Discount</span>
-                  <span>-{formatPaise(whatsappReceipt.order.discount_paise)}</span>
+                  <span>{phoneDiscountPct}% Mobile Discount</span>
+                  <span>-{formatPaise(whatsappReceipt.order.phone_discount_paise)}</span>
+                </div>
+              )}
+              {whatsappReceipt.order.review_discount_paise > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>+{reviewDiscountPct}% Google Review Discount</span>
+                  <span>-{formatPaise(whatsappReceipt.order.review_discount_paise)}</span>
                 </div>
               )}
               <div className="flex justify-between text-stone-400">
                 <span>GST (on Subtotal - Discount)</span>
                 <span>{formatPaise(whatsappReceipt.order.tax_paise)}</span>
               </div>
-              <div className="flex justify-between text-base font-extrabold text-[#141414] pt-1.5 border-t border-stone-200/80">
+              <div className="flex justify-between text-base font-bold text-[#141414] pt-1.5 border-t border-stone-200/80">
                 <span>Total Paid</span>
                 <span>{formatPaise(whatsappReceipt.order.total_paise)}</span>
               </div>
@@ -745,7 +828,7 @@ export const CustomerView: React.FC = () => {
               setWhatsappReceipt(null);
               setEntryStep("welcome");
             }}
-            className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs transition"
+            className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-semibold text-xs transition"
           >
             Start New Table Session
           </button>
@@ -755,21 +838,21 @@ export const CustomerView: React.FC = () => {
   }
 
   // ============================================================================
-  // SCREEN 3: ORBIX STUDIO 2025 CONSUMER APP (MOBILE APP & LAPTOP SPLIT WEBAPP)
+  // SCREEN 3: ORBIX STUDIO 2025 CONSUMER APP (CLEAN PROFESSIONAL TYPOGRAPHY)
   // ============================================================================
   const isDesktopWebApp = customerMode === "tablet";
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#F9EDE8]/60 via-[#FAF8F6] to-[#F4F1EC] pb-28">
+    <div className="min-h-screen bg-gradient-to-b from-[#F9EDE8]/60 via-[#FAF8F6] to-[#F4F1EC] pb-28 font-sans">
       {/* Desktop WebApp / Mobile Phone Frame Switcher Header */}
       <div className="hidden md:flex max-w-7xl mx-auto pt-4 px-6 items-center justify-between text-xs text-stone-500">
         <div className="flex items-center gap-2">
-          <span className="font-extrabold text-[#141414]">{restaurant?.name}</span>
+          <span className="font-bold text-[#141414]">{restaurant?.name}</span>
           <span>•</span>
           <span>Table #{selectedTableNumber}</span>
           {activeSession?.is_phone_verified && (
-            <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-              5% VIP Discount Active
+            <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-[10px]">
+              {phoneDiscountPct}% Mobile Discount Active
             </span>
           )}
         </div>
@@ -777,7 +860,7 @@ export const CustomerView: React.FC = () => {
         <div className="flex items-center gap-1 bg-white rounded-full p-1 border border-stone-200/80 shadow-2xs">
           <button
             onClick={() => setCustomerMode("tablet")}
-            className={`px-3.5 py-1 rounded-full font-bold transition ${
+            className={`px-3.5 py-1 rounded-full font-semibold transition ${
               customerMode === "tablet"
                 ? "bg-[#141414] text-white"
                 : "text-stone-500 hover:text-[#141414]"
@@ -787,7 +870,7 @@ export const CustomerView: React.FC = () => {
           </button>
           <button
             onClick={() => setCustomerMode("qr")}
-            className={`px-3.5 py-1 rounded-full font-bold flex items-center gap-1 transition ${
+            className={`px-3.5 py-1 rounded-full font-semibold flex items-center gap-1 transition ${
               customerMode === "qr"
                 ? "bg-[#141414] text-white"
                 : "text-stone-500 hover:text-[#141414]"
@@ -815,7 +898,7 @@ export const CustomerView: React.FC = () => {
               <button
                 onClick={() => setFacilitiesModalOpen(true)}
                 className="w-11 h-11 rounded-full bg-white border border-stone-200/70 shadow-2xs flex items-center justify-center text-[#141414] hover:border-[#141414] transition"
-                title="Restaurant Info & Washroom Map"
+                title="2D Floor & Washroom Map"
               >
                 <MapPin className="w-4 h-4 text-[#141414]" />
               </button>
@@ -823,17 +906,25 @@ export const CustomerView: React.FC = () => {
                 <div className="text-[11px] text-stone-400 font-medium">
                   {restaurant?.name || "Shree Ram Dhaba"}
                 </div>
-                <div className="text-sm font-extrabold text-[#141414] flex items-center gap-1.5">
+                <div className="text-sm font-bold text-[#141414] flex items-center gap-1.5">
                   <span>Table #{selectedTableNumber}</span>
                   <span className="text-stone-300">•</span>
-                  <span className="text-xs font-semibold text-stone-500">
+                  <span className="text-xs font-medium text-stone-500">
                     {currentTable?.zone || "Main Hall"}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => playWelcomeGreeting("hi")}
+                className="w-11 h-11 rounded-full bg-white border border-stone-200/70 shadow-2xs flex items-center justify-center text-[#141414] hover:bg-[#141414] hover:text-white transition"
+                title="Listen Voice Guide (Hindi)"
+              >
+                <Volume2 className="w-4 h-4" />
+              </button>
+
               <button
                 onClick={() => setEssentialsModalOpen(true)}
                 className="w-11 h-11 rounded-full bg-white border border-stone-200/70 shadow-2xs flex items-center justify-center text-[#141414] hover:bg-[#141414] hover:text-white transition relative"
@@ -849,7 +940,7 @@ export const CustomerView: React.FC = () => {
               >
                 <ShoppingBag className="w-4 h-4" />
                 {totalCartItems > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#FF6B4A] text-white text-[10px] font-extrabold flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#FF6B4A] text-white text-[10px] font-bold flex items-center justify-center">
                     {totalCartItems}
                   </span>
                 )}
@@ -858,7 +949,7 @@ export const CustomerView: React.FC = () => {
           </div>
 
           {toastMsg && (
-            <div className="mx-5 mb-3 px-4 py-2.5 rounded-2xl bg-[#141414] text-white text-xs font-semibold flex items-center justify-between shadow-lg">
+            <div className="mx-5 mb-3 px-4 py-2.5 rounded-2xl bg-[#141414] text-white text-xs font-medium flex items-center justify-between shadow-lg">
               <span className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#FF6B4A]" />
                 {toastMsg}
@@ -874,24 +965,22 @@ export const CustomerView: React.FC = () => {
             <div>
               <div className="px-5 pt-1 pb-5 space-y-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h1 className="text-[32px] sm:text-[36px] tracking-tight leading-none">
-                    <span className="font-extrabold text-[#141414]">Hungry?</span>{" "}
+                  <h1 className="text-[30px] sm:text-[34px] tracking-tight leading-none">
+                    <span className="font-bold text-[#141414]">Hungry?</span>{" "}
                     <span className="font-light text-stone-400">Order & Eat.</span>
                   </h1>
 
                   {activeOrder && (
                     <button
                       onClick={() => setActiveTab("order")}
-                      className="px-3.5 py-1.5 rounded-full bg-[#FF6B4A]/15 text-[#FF6B4A] text-xs font-extrabold flex items-center gap-1.5"
+                      className="px-3.5 py-1.5 rounded-full bg-[#FF6B4A]/15 text-[#FF6B4A] text-xs font-semibold flex items-center gap-1.5"
                     >
                       <Clock className="w-3.5 h-3.5 animate-pulse" />
-                      Order {activeOrder.status.toUpperCase()} •{" "}
-                      {activeOrder.effective_prep_minutes}m
+                      Order {activeOrder.status.toUpperCase()} • Repeat Roti / View
                     </button>
                   )}
                 </div>
 
-                {/* Search Pill + Circular Matte Black Filter/AI Button */}
                 <div className="flex items-center gap-2.5">
                   <div className="flex-1 flex items-center gap-2.5 bg-white rounded-full px-4 py-3.5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-stone-100">
                     <Search className="w-4 h-4 text-stone-400 shrink-0" />
@@ -900,7 +989,7 @@ export const CustomerView: React.FC = () => {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Search dishes or say in Hinglish..."
-                      className="w-full bg-transparent text-xs font-medium text-[#141414] placeholder:text-stone-400 focus:outline-none"
+                      className="w-full bg-transparent text-xs font-normal text-[#141414] placeholder:text-stone-400 focus:outline-none"
                     />
                     {searchQuery && (
                       <button onClick={() => setSearchQuery("")}>
@@ -950,14 +1039,14 @@ export const CustomerView: React.FC = () => {
                         <span
                           className={`text-xs mt-2 transition ${
                             isActive
-                              ? "font-extrabold text-[#141414]"
-                              : "font-medium text-stone-400"
+                              ? "font-bold text-[#141414]"
+                              : "font-normal text-stone-400"
                           }`}
                         >
                           {cat.shortLabel}
                         </span>
                         <span
-                          className={`h-[3px] rounded-full mt-1 transition-all ${
+                          className={`h-[2.5px] rounded-full mt-1 transition-all ${
                             isActive ? "w-5 bg-[#141414]" : "w-0 bg-transparent"
                           }`}
                         />
@@ -987,7 +1076,7 @@ export const CustomerView: React.FC = () => {
                         {item.model_3d_url && (
                           <button
                             onClick={() => setActive3DItem(item)}
-                            className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-[#F7F5F2] hover:bg-[#141414] text-[#141414] hover:text-white text-[9px] font-extrabold tracking-tight transition flex items-center gap-0.5"
+                            className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-[#F7F5F2] hover:bg-[#141414] text-[#141414] hover:text-white text-[9px] font-semibold tracking-tight transition flex items-center gap-0.5"
                             title="Inspect Interactive 3D Dish"
                           >
                             <Box className="w-2.5 h-2.5" /> 3D
@@ -1007,16 +1096,16 @@ export const CustomerView: React.FC = () => {
                           </div>
 
                           <div className="mt-1">
-                            <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#141414] text-white text-[10px] font-bold">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#141414] text-white text-[10px] font-semibold">
                               {activeSession?.is_phone_verified
-                                ? "-5% VIP"
+                                ? `-${phoneDiscountPct}% VIP`
                                 : item.is_bestseller
                                 ? "BESTSELLER"
                                 : `${item.prep_time_minutes} MIN`}
                             </span>
                           </div>
 
-                          <h3 className="font-extrabold text-[#141414] text-sm mt-2 line-clamp-1">
+                          <h3 className="font-semibold text-[#141414] text-sm mt-2 line-clamp-1">
                             {cleanTitle}
                           </h3>
                           <p className="text-[11px] text-stone-400 mt-0.5 line-clamp-1">
@@ -1026,10 +1115,10 @@ export const CustomerView: React.FC = () => {
 
                         <div className="w-full flex items-center justify-between mt-3.5 pt-1">
                           <div className="text-left">
-                            <span className="text-xs font-bold text-stone-400 mr-0.5">
+                            <span className="text-xs font-medium text-stone-400 mr-0.5">
                               ₹
                             </span>
-                            <span className="text-base sm:text-lg font-extrabold text-[#141414]">
+                            <span className="text-base sm:text-lg font-bold text-[#141414]">
                               {(item.display_price_paise / 100).toFixed(0)}
                             </span>
                           </div>
@@ -1042,7 +1131,7 @@ export const CustomerView: React.FC = () => {
                               >
                                 <Minus className="w-3 h-3" />
                               </button>
-                              <span className="text-xs font-extrabold px-0.5">
+                              <span className="text-xs font-semibold px-0.5">
                                 {inCart.qty}
                               </span>
                               <button
@@ -1082,7 +1171,7 @@ export const CustomerView: React.FC = () => {
           {activeTab === "offers" && (
             <div className="px-5 py-4 space-y-5">
               <div>
-                <h2 className="text-2xl font-extrabold text-[#141414]">
+                <h2 className="text-2xl font-bold text-[#141414]">
                   AI Concierge{" "}
                   <span className="font-light text-stone-400">& Occasions</span>
                 </h2>
@@ -1096,7 +1185,7 @@ export const CustomerView: React.FC = () => {
                 className="bg-white rounded-[28px] p-5 shadow-[0_8px_30px_rgba(0,0,0,0.04)] space-y-3"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-[#141414] flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-[#141414] flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-[#FF6B4A]" />
                     Voice & Hinglish Smart Order
                   </span>
@@ -1109,7 +1198,7 @@ export const CustomerView: React.FC = () => {
                           : "2 Truffle Burrata Sourdough Pizza and 2 Smoked Hazelnut Cortado"
                       )
                     }
-                    className="text-[11px] font-bold text-[#FF6B4A] hover:underline"
+                    className="text-[11px] font-semibold text-[#FF6B4A] hover:underline"
                   >
                     Fill Sample Hinglish
                   </button>
@@ -1132,12 +1221,12 @@ export const CustomerView: React.FC = () => {
                     value={aiInput}
                     onChange={(e) => setAiInput(e.target.value)}
                     placeholder="e.g. '2 paneer butter masala aur 4 butter naan, kam teekha'..."
-                    className="flex-1 bg-[#F7F5F2] rounded-2xl px-4 py-2.5 text-xs font-medium text-[#141414] focus:outline-none"
+                    className="flex-1 bg-[#F7F5F2] rounded-2xl px-4 py-2.5 text-xs font-normal text-[#141414] focus:outline-none"
                   />
                   <button
                     type="submit"
                     disabled={aiBusy}
-                    className="px-4 py-2.5 rounded-2xl bg-[#141414] hover:bg-[#FF6B4A] text-white text-xs font-bold transition shrink-0"
+                    className="px-4 py-2.5 rounded-2xl bg-[#141414] hover:bg-[#FF6B4A] text-white text-xs font-semibold transition shrink-0"
                   >
                     {aiBusy ? "..." : "Add"}
                   </button>
@@ -1148,7 +1237,7 @@ export const CustomerView: React.FC = () => {
               </form>
 
               <div className="space-y-3">
-                <div className="text-xs font-extrabold text-stone-400 uppercase tracking-wider">
+                <div className="text-xs font-bold text-stone-400 uppercase tracking-wider">
                   Select Dining Occasion
                 </div>
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -1156,7 +1245,7 @@ export const CustomerView: React.FC = () => {
                     <button
                       key={occ.id}
                       onClick={() => setSelectedOccasion(occ.id)}
-                      className={`px-4 py-2.5 rounded-full text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 ${
+                      className={`px-4 py-2.5 rounded-full text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 ${
                         selectedOccasion === occ.id
                           ? "bg-[#141414] text-white shadow-sm"
                           : "bg-white text-stone-600 border border-stone-200/70"
@@ -1170,7 +1259,7 @@ export const CustomerView: React.FC = () => {
               </div>
 
               <div className="space-y-3">
-                <div className="text-xs font-extrabold text-stone-400 uppercase tracking-wider">
+                <div className="text-xs font-bold text-stone-400 uppercase tracking-wider">
                   Curated For Your Table
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1185,13 +1274,13 @@ export const CustomerView: React.FC = () => {
                         className="w-16 h-16 object-contain shrink-0"
                       />
                       <div className="min-w-0 flex-1">
-                        <div className="font-extrabold text-xs text-[#141414] truncate">
+                        <div className="font-semibold text-xs text-[#141414] truncate">
                           {sug.name.replace(" (3D View)", "")}
                         </div>
                         <p className="text-[11px] text-stone-400 line-clamp-2 mt-0.5">
                           {sug.reason}
                         </p>
-                        <div className="font-extrabold text-xs text-[#FF6B4A] mt-1">
+                        <div className="font-bold text-xs text-[#FF6B4A] mt-1">
                           {formatPaise(sug.display_price_paise)}
                         </div>
                       </div>
@@ -1217,23 +1306,38 @@ export const CustomerView: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 3: LIVE ORDER STATUS */}
+          {/* ================================================================ */}
+          {/* TAB 3: CONTINUOUS DINING & "COMPLETE MEAL" BILLING SCREEN         */}
+          {/* ================================================================ */}
           {activeTab === "order" && (
             <div className="px-5 py-4 space-y-5">
               <div>
-                <h2 className="text-2xl font-extrabold text-[#141414]">
-                  Live Kitchen{" "}
-                  <span className="font-light text-stone-400">Order Tracker</span>
+                <h2 className="text-2xl font-bold text-[#141414]">
+                  {mealCompletedScreen ? (
+                    <>
+                      Meal Complete{" "}
+                      <span className="font-light text-stone-400">& Final Bill</span>
+                    </>
+                  ) : (
+                    <>
+                      Live Dining{" "}
+                      <span className="font-light text-stone-400">
+                        & 1-Tap Repeat
+                      </span>
+                    </>
+                  )}
                 </h2>
                 <p className="text-xs text-stone-500 mt-1">
-                  Real-time preparation timer synced directly with the chef's KDS screen.
+                  {mealCompletedScreen
+                    ? `Rate your experience on Google to unlock an extra +${reviewDiscountPct}% off your total bill!`
+                    : "Enjoy your meal! Repeat hot chapatis, rotis, or dishes in 1 tap anytime. Press 'Complete Meal' only when you finish dining."}
                 </p>
               </div>
 
               {!activeOrder ? (
                 <div className="bg-white rounded-[32px] p-8 text-center space-y-3 shadow-[0_8px_30px_rgba(0,0,0,0.03)]">
                   <Clock className="w-10 h-10 text-stone-300 mx-auto" />
-                  <h3 className="text-base font-extrabold text-[#141414]">
+                  <h3 className="text-base font-bold text-[#141414]">
                     No Active Order in Kitchen Yet
                   </h3>
                   <p className="text-xs text-stone-400 max-w-xs mx-auto">
@@ -1241,83 +1345,112 @@ export const CustomerView: React.FC = () => {
                   </p>
                   <button
                     onClick={() => setActiveTab("home")}
-                    className="px-5 py-2.5 rounded-full bg-[#141414] text-white text-xs font-bold"
+                    className="px-5 py-2.5 rounded-full bg-[#141414] text-white text-xs font-semibold"
                   >
                     Explore Menu
                   </button>
                 </div>
-              ) : (
+              ) : !mealCompletedScreen ? (
+                /* CONTINUOUS DINING MODE: Repeat Chapatis / Dishes Anytime — Never Forces Bill */
                 <div className="space-y-4">
-                  <div className="bg-white rounded-[32px] p-6 shadow-[0_12px_36px_rgba(0,0,0,0.04)] space-y-4">
+                  <div className="bg-white rounded-[32px] p-6 shadow-[0_12px_36px_rgba(0,0,0,0.04)] space-y-5">
                     <div className="flex items-center justify-between">
-                      <span className="px-3 py-1 rounded-full bg-[#FF6B4A]/15 text-[#FF6B4A] text-xs font-extrabold uppercase">
-                        Status: {activeOrder.status}
+                      <span className="px-3 py-1 rounded-full bg-[#FF6B4A]/15 text-[#FF6B4A] text-xs font-bold uppercase">
+                        Kitchen Status: {activeOrder.status}
                       </span>
-                      <span className="text-xs font-bold text-stone-400">
-                        Table #{activeOrder.table_number}
+                      <span className="text-xs font-semibold text-stone-400">
+                        Prep ETA: ~{activeOrder.effective_prep_minutes} mins
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-3xl font-extrabold text-[#141414]">
-                          ~{activeOrder.effective_prep_minutes} mins
-                        </div>
-                        <div className="text-xs text-stone-400">
-                          Estimated preparation time
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xl font-extrabold text-[#141414]">
-                          {formatPaise(activeOrder.total_paise)}
-                        </div>
-                        <div className="text-[11px] text-emerald-600 font-semibold">
-                          {activeOrder.discount_paise > 0
-                            ? "Includes 5% VIP Discount"
-                            : "GST Included"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pt-3 border-t border-stone-100">
-                      <div className="text-xs font-extrabold text-[#141414] mb-2 flex items-center gap-1.5">
+                    {/* 1-Tap Hot Chapati / Bread & Dish Repeat */}
+                    <div className="space-y-2.5">
+                      <div className="text-xs font-bold text-[#141414] flex items-center gap-1.5">
                         <RefreshCw className="w-3.5 h-3.5 text-[#FF6B4A]" />
-                        1-Tap Instant Repeat
+                        1-Tap Add Hot Chapati / Repeat Ordered Dishes (Priority Kitchen Lane)
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {activeOrder.items.map((item: any, idx: number) => (
                           <button
                             key={idx}
                             onClick={() => handleRepeatItem(item.menu_item_id, item.name)}
-                            className="px-3.5 py-2 rounded-2xl bg-[#F7F5F2] hover:bg-[#141414] text-[#141414] hover:text-white text-xs font-bold transition flex items-center gap-1.5"
+                            className="px-3.5 py-2 rounded-2xl bg-[#F7F5F2] hover:bg-[#141414] text-[#141414] hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-stone-200/70"
                           >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>+1 {item.name.replace(" (3D View)", "")}</span>
+                            <Plus className="w-3.5 h-3.5 text-[#FF6B4A]" />
+                            <span>
+                              +1 {item.name.replace(" (3D View)", "")} (
+                              {formatPaise(item.display_unit_paise)})
+                            </span>
+                          </button>
+                        ))}
+                        {breadItems.map((b: any) => (
+                          <button
+                            key={b.id}
+                            onClick={() => handleRepeatItem(b.id, b.name)}
+                            className="px-3.5 py-2 rounded-2xl bg-amber-50 hover:bg-[#141414] text-[#141414] hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-amber-200"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-[#FF6B4A]" />
+                            <span>
+                              🫓 +1 Hot {b.name} ({formatPaise(b.display_price_paise)})
+                            </span>
                           </button>
                         ))}
                       </div>
                     </div>
 
-                    <button
-                      disabled={paymentBusy}
-                      onClick={() => handlePayOrder("upi")}
-                      className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs shadow-lg transition flex items-center justify-center gap-2"
-                    >
-                      <CreditCard className="w-4 h-4" />
-                      <span>
-                        {paymentBusy
-                          ? "Processing Payment..."
-                          : `Pay ${formatPaise(activeOrder.total_paise)} & Get WhatsApp Bill`}
-                      </span>
-                    </button>
+                    {/* Ordered Items List */}
+                    <div className="pt-3 border-t border-stone-100 space-y-2">
+                      <div className="text-xs font-semibold text-stone-400">
+                        Dishes Served / Preparing at Table #{activeOrder.table_number}:
+                      </div>
+                      {activeOrder.items.map((item: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between text-xs py-1"
+                        >
+                          <span className="text-[#141414] font-medium">
+                            {item.qty}x {item.name.replace(" (3D View)", "")}
+                            {item.is_repeat && (
+                              <span className="ml-1.5 text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">
+                                Repeat
+                              </span>
+                            )}
+                          </span>
+                          <span className="font-semibold text-[#141414]">
+                            {formatPaise(item.line_display_total_paise)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* "Meal Complete (Breakfast / Lunch / Dinner)" Button */}
+                    <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-3">
+                      <button
+                        onClick={() => setActiveTab("home")}
+                        className="px-4 py-3 rounded-full bg-[#F7F5F2] hover:bg-stone-200 text-[#141414] text-xs font-semibold transition"
+                      >
+                        + Add More Dishes
+                      </button>
+
+                      <button
+                        onClick={() => setMealCompletedScreen(true)}
+                        className="flex-1 py-3.5 px-6 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-semibold text-xs shadow-lg transition flex items-center justify-center gap-2"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-[#9FE870]" />
+                        <span>
+                          Complete Lunch / Dinner & View Final Bill (Get +{reviewDiscountPct}% Off)
+                        </span>
+                      </button>
+                    </div>
                   </div>
 
+                  {/* Gamified Waiting Card */}
                   <div className="bg-white rounded-[32px] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.03)] flex items-center justify-between gap-4">
                     <div>
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#FF6B4A]">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#FF6B4A]">
                         While Your Food Cooks
                       </span>
-                      <h4 className="text-sm font-extrabold text-[#141414] mt-0.5">
+                      <h4 className="text-sm font-bold text-[#141414] mt-0.5">
                         {wonPrize
                           ? `🎉 Won: ${wonPrize}!`
                           : "Spin the Table Reward Wheel"}
@@ -1329,9 +1462,152 @@ export const CustomerView: React.FC = () => {
                     <button
                       onClick={handleSpinWheel}
                       disabled={wheelSpinning}
-                      className="px-4 py-2.5 rounded-full bg-[#FF6B4A] text-white font-bold text-xs shrink-0 shadow-md"
+                      className="px-4 py-2.5 rounded-full bg-[#FF6B4A] text-white font-semibold text-xs shrink-0 shadow-md"
                     >
                       {wheelSpinning ? "Spinning..." : "Spin 🎡"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* FINAL BILLING SCREEN (Triggered after pressing "Complete Lunch / Dinner") */
+                <div className="space-y-4">
+                  {/* Google Review +2% Extra Discount Card */}
+                  <form
+                    onSubmit={handleSubmitGoogleReview}
+                    className="bg-white rounded-[32px] p-6 shadow-[0_12px_36px_rgba(0,0,0,0.04)] border-2 border-[#9FE870] space-y-4"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="px-3 py-1 rounded-full bg-[#222423] text-[#9FE870] text-[10px] font-bold uppercase">
+                          Instant Google Review Reward
+                        </span>
+                        <h3 className="text-base font-bold text-[#141414] mt-2">
+                          Rate {restaurant?.name} on Google & Save Extra +{reviewDiscountPct}%!
+                        </h3>
+                        <p className="text-xs text-stone-500 mt-0.5">
+                          {activeOrder.is_google_reviewed
+                            ? `✓ Your +${reviewDiscountPct}% Google Review Discount is applied below!`
+                            : `Leave a quick Google rating right now to deduct an extra ${reviewDiscountPct}% from your bill.`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {!activeOrder.is_google_reviewed && (
+                      <>
+                        <div className="flex items-center gap-2">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              type="button"
+                              key={star}
+                              onClick={() => setReviewStars(star)}
+                              className={`p-2 rounded-xl transition ${
+                                star <= reviewStars
+                                  ? "text-amber-400 scale-110"
+                                  : "text-stone-300"
+                              }`}
+                            >
+                              <Star className="w-6 h-6 fill-current" />
+                            </button>
+                          ))}
+                          <span className="text-xs font-bold text-[#141414] ml-2">
+                            {reviewStars}.0 / 5.0 Stars
+                          </span>
+                        </div>
+
+                        <input
+                          type="text"
+                          value={reviewText}
+                          onChange={(e) => setReviewText(e.target.value)}
+                          placeholder="Share your experience on Google Reviews..."
+                          className="w-full bg-[#F7F5F2] rounded-2xl px-4 py-2.5 text-xs text-[#141414]"
+                        />
+
+                        <button
+                          type="submit"
+                          disabled={reviewSubmitting}
+                          className="w-full py-3 rounded-full bg-[#222423] hover:bg-[#333634] text-[#9FE870] font-bold text-xs transition"
+                        >
+                          {reviewSubmitting
+                            ? "Applying Google Review Discount..."
+                            : `Submit Google Review & Apply +${reviewDiscountPct}% Off Now`}
+                        </button>
+                      </>
+                    )}
+                  </form>
+
+                  {/* Final Itemized Bill Card */}
+                  <div className="bg-white rounded-[32px] p-6 shadow-[0_12px_36px_rgba(0,0,0,0.04)] space-y-4">
+                    <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                      <h3 className="text-base font-bold text-[#141414]">
+                        Final Table #{activeOrder.table_number} Bill Summary
+                      </h3>
+                      <button
+                        onClick={() => setMealCompletedScreen(false)}
+                        className="text-xs font-semibold text-[#FF6B4A] hover:underline"
+                      >
+                        ← Back to Add More Roti/Items
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      {activeOrder.items.map((item: any, idx: number) => (
+                        <div key={idx} className="flex justify-between text-stone-600">
+                          <span>
+                            {item.qty}x {item.name.replace(" (3D View)", "")}
+                          </span>
+                          <span className="font-semibold text-[#141414]">
+                            {formatPaise(item.line_display_total_paise)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t border-stone-100 pt-3 space-y-1.5 text-xs">
+                      <div className="flex justify-between text-stone-500">
+                        <span>Items Subtotal</span>
+                        <span className="font-semibold text-[#141414]">
+                          {formatPaise(activeOrder.subtotal_paise)}
+                        </span>
+                      </div>
+
+                      {activeOrder.phone_discount_paise > 0 && (
+                        <div className="flex justify-between text-emerald-600 font-semibold">
+                          <span>Verified Mobile Discount ({phoneDiscountPct}%)</span>
+                          <span>-{formatPaise(activeOrder.phone_discount_paise)}</span>
+                        </div>
+                      )}
+
+                      {activeOrder.review_discount_paise > 0 && (
+                        <div className="flex justify-between text-emerald-600 font-semibold">
+                          <span>Google Review Bonus Discount (+{reviewDiscountPct}%)</span>
+                          <span>-{formatPaise(activeOrder.review_discount_paise)}</span>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between text-stone-500">
+                        <span>GST (Computed on Subtotal - Total Discount)</span>
+                        <span className="font-semibold text-[#141414]">
+                          {formatPaise(activeOrder.tax_paise)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between text-lg font-bold text-[#141414] pt-2 border-t border-stone-100">
+                        <span>Final Payable Total</span>
+                        <span>{formatPaise(activeOrder.total_paise)}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      disabled={paymentBusy}
+                      onClick={() => handlePayOrder("upi")}
+                      className="w-full py-4 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs shadow-lg transition flex items-center justify-center gap-2"
+                    >
+                      <CreditCard className="w-4 h-4" />
+                      <span>
+                        {paymentBusy
+                          ? "Processing Payment..."
+                          : `Pay ${formatPaise(activeOrder.total_paise)} (UPI / Card) & Send WhatsApp Bill`}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -1343,18 +1619,18 @@ export const CustomerView: React.FC = () => {
           {activeTab === "cart" && (
             <div className="px-5 py-4 space-y-5">
               <div>
-                <h2 className="text-2xl font-extrabold text-[#141414]">
+                <h2 className="text-2xl font-bold text-[#141414]">
                   Your Table <span className="font-light text-stone-400">Bag</span>
                 </h2>
                 <p className="text-xs text-stone-500 mt-1">
-                  All prices, 5% verified discount, and GST are calculated server-side.
+                  All prices, {phoneDiscountPct}% verified discount, and GST are calculated server-side.
                 </p>
               </div>
 
               {cart.length === 0 ? (
                 <div className="bg-white rounded-[32px] p-8 text-center space-y-3 shadow-[0_8px_30px_rgba(0,0,0,0.03)]">
                   <ShoppingBag className="w-10 h-10 text-stone-300 mx-auto" />
-                  <h3 className="text-base font-extrabold text-[#141414]">
+                  <h3 className="text-base font-bold text-[#141414]">
                     Your Bag is Empty
                   </h3>
                   <p className="text-xs text-stone-400">
@@ -1362,7 +1638,7 @@ export const CustomerView: React.FC = () => {
                   </p>
                   <button
                     onClick={() => setActiveTab("home")}
-                    className="px-5 py-2.5 rounded-full bg-[#141414] text-white text-xs font-bold"
+                    className="px-5 py-2.5 rounded-full bg-[#141414] text-white text-xs font-semibold"
                   >
                     Browse Dishes
                   </button>
@@ -1383,10 +1659,10 @@ export const CustomerView: React.FC = () => {
                               className="w-14 h-14 object-contain shrink-0"
                             />
                             <div className="min-w-0">
-                              <div className="font-extrabold text-sm text-[#141414] truncate">
+                              <div className="font-semibold text-sm text-[#141414] truncate">
                                 {c.name.replace(" (3D View)", "")}
                               </div>
-                              <div className="text-xs font-bold text-stone-400">
+                              <div className="text-xs font-medium text-stone-400">
                                 {formatPaise(c.display_unit_paise)} each
                               </div>
                             </div>
@@ -1399,7 +1675,7 @@ export const CustomerView: React.FC = () => {
                             >
                               <Minus className="w-3 h-3" />
                             </button>
-                            <span className="text-xs font-extrabold text-[#141414] px-1">
+                            <span className="text-xs font-bold text-[#141414] px-1">
                               {c.qty}
                             </span>
                             <button
@@ -1429,21 +1705,21 @@ export const CustomerView: React.FC = () => {
                       <div className="space-y-1.5 text-xs">
                         <div className="flex justify-between text-stone-500">
                           <span>Subtotal</span>
-                          <span className="font-bold text-[#141414]">
+                          <span className="font-semibold text-[#141414]">
                             {formatPaise(cartPreview.subtotal_paise)}
                           </span>
                         </div>
                         {cartPreview.discount_paise > 0 ? (
-                          <div className="flex justify-between text-emerald-600 font-bold">
-                            <span>5% Verified Mobile Discount</span>
+                          <div className="flex justify-between text-emerald-600 font-semibold">
+                            <span>Verified Discount</span>
                             <span>-{formatPaise(cartPreview.discount_paise)}</span>
                           </div>
                         ) : (
-                          <div className="flex justify-between text-[#FF6B4A] font-semibold">
-                            <span>Verify Mobile to Save 5% Now</span>
+                          <div className="flex justify-between text-[#FF6B4A] font-medium">
+                            <span>Verify Mobile to Save {phoneDiscountPct}% Now</span>
                             <button
                               onClick={() => setEntryStep("welcome")}
-                              className="underline font-bold"
+                              className="underline font-semibold"
                             >
                               Verify
                             </button>
@@ -1454,21 +1730,21 @@ export const CustomerView: React.FC = () => {
                             GST ({(cartPreview.gst_bps / 100).toFixed(0)}% on Subtotal -
                             Discount)
                           </span>
-                          <span className="font-bold text-[#141414]">
+                          <span className="font-semibold text-[#141414]">
                             {formatPaise(cartPreview.tax_paise)}
                           </span>
                         </div>
-                        <div className="flex justify-between text-base font-extrabold text-[#141414] pt-2 border-t border-stone-100">
-                          <span>Total Payable</span>
+                        <div className="flex justify-between text-base font-bold text-[#141414] pt-2 border-t border-stone-100">
+                          <span>Order Total</span>
                           <span>{formatPaise(cartPreview.total_paise)}</span>
                         </div>
                       </div>
 
                       <button
                         onClick={handlePlaceOrder}
-                        className="w-full py-4 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs shadow-lg transition"
+                        className="w-full py-4 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-semibold text-xs shadow-lg transition"
                       >
-                        Place Order to Kitchen • {formatPaise(cartPreview.total_paise)}
+                        Send Order to Kitchen • {formatPaise(cartPreview.total_paise)}
                       </button>
                     </div>
                   )}
@@ -1477,12 +1753,12 @@ export const CustomerView: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 5: PROFILE (Matches Left Phone in Orbix Studio Reference) */}
+          {/* TAB 5: PROFILE */}
           {activeTab === "profile" && (
             <div className="px-5 py-6 space-y-6">
               <div className="flex flex-col items-center text-center">
                 <div className="relative">
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-[#FF6B4A]/20 to-amber-100 border-2 border-white shadow-md flex items-center justify-center text-2xl font-black text-[#141414]">
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-[#FF6B4A]/20 to-amber-100 border-2 border-white shadow-md flex items-center justify-center text-2xl font-bold text-[#141414]">
                     {(activeSession?.customer_name || guestNameInput || "G")[0]}
                   </div>
                   <span className="absolute bottom-0.5 right-0.5 w-6 h-6 rounded-full bg-[#FF6B4A] text-white flex items-center justify-center border-2 border-white shadow-xs">
@@ -1490,12 +1766,12 @@ export const CustomerView: React.FC = () => {
                   </span>
                 </div>
 
-                <h2 className="text-lg font-extrabold text-[#141414] mt-3">
+                <h2 className="text-lg font-bold text-[#141414] mt-3">
                   {activeSession?.customer_name || guestNameInput || "Guest Diner"}
                 </h2>
                 <p className="text-xs text-stone-400">
                   {activeSession?.is_phone_verified
-                    ? `+91 ${activeSession.customer_phone} • 5% VIP Discount Unlocked`
+                    ? `+91 ${activeSession.customer_phone} • ${phoneDiscountPct}% VIP Discount Active`
                     : `Table #${selectedTableNumber} • Guest Session`}
                 </p>
               </div>
@@ -1504,15 +1780,15 @@ export const CustomerView: React.FC = () => {
                 {[
                   {
                     icon: <User className="w-4 h-4 text-[#141414]" />,
-                    label: "Personal Information & 5% VIP Status",
+                    label: `Personal Information & ${phoneDiscountPct}% VIP Status`,
                     sub: activeSession?.is_phone_verified
                       ? "Verified & DPDP Consented"
-                      : "Tap to verify mobile for 5% off",
+                      : `Tap to verify mobile for ${phoneDiscountPct}% off`,
                     onClick: () => setEntryStep("welcome"),
                   },
                   {
                     icon: <Tag className="w-4 h-4 text-[#141414]" />,
-                    label: "My Orders & Live Prep Timer",
+                    label: "Live Order & 1-Tap Repeat Roti",
                     sub: activeOrder
                       ? `Order ${activeOrder.status.toUpperCase()} • ${formatPaise(
                           activeOrder.total_paise
@@ -1522,10 +1798,10 @@ export const CustomerView: React.FC = () => {
                   },
                   {
                     icon: <MapPin className="w-4 h-4 text-[#141414]" />,
-                    label: "Restroom, Handwash & Facility Guide",
+                    label: "2D Floor Map: Washroom & Handwash Path",
                     sub:
                       restaurant?.facilities_info?.restroom_directions ||
-                      "Directions & Wi-Fi",
+                      "Visual map from your table to Washroom",
                     onClick: () => setFacilitiesModalOpen(true),
                   },
                   {
@@ -1536,9 +1812,12 @@ export const CustomerView: React.FC = () => {
                   },
                   {
                     icon: <CreditCard className="w-4 h-4 text-[#141414]" />,
-                    label: "Payment Methods & WhatsApp Bill",
-                    sub: "UPI, Card & Split Bill at Table",
-                    onClick: () => setActiveTab(activeOrder ? "order" : "cart"),
+                    label: `Complete Meal & Claim +${reviewDiscountPct}% Google Review Off`,
+                    sub: "Generate final bill when you finish dining",
+                    onClick: () => {
+                      setMealCompletedScreen(true);
+                      setActiveTab("order");
+                    },
                   },
                   {
                     icon: <HelpCircle className="w-4 h-4 text-[#141414]" />,
@@ -1565,7 +1844,7 @@ export const CustomerView: React.FC = () => {
                         {row.icon}
                       </div>
                       <div className="min-w-0">
-                        <div className="text-xs font-bold text-[#141414] truncate">
+                        <div className="text-xs font-semibold text-[#141414] truncate">
                           {row.label}
                         </div>
                         <div className="text-[11px] text-stone-400 truncate mt-0.5">
@@ -1581,54 +1860,57 @@ export const CustomerView: React.FC = () => {
           )}
         </div>
 
-        {/* RIGHT STICKY COLUMN ON LAPTOP WEBAPP MODE (Bag + Live Order + Quick Actions) */}
+        {/* RIGHT STICKY COLUMN ON LAPTOP WEBAPP MODE */}
         {isDesktopWebApp && (
           <aside className="hidden lg:block lg:col-span-4 sticky top-6 space-y-5 pt-4">
-            {/* Active Order Card (if any) */}
             {activeOrder && (
               <div className="bg-[#141414] text-white rounded-[32px] p-6 shadow-xl space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="px-3 py-1 rounded-full bg-[#FF6B4A] text-white text-[10px] font-extrabold uppercase">
+                  <span className="px-3 py-1 rounded-full bg-[#FF6B4A] text-white text-[10px] font-bold uppercase">
                     Kitchen: {activeOrder.status}
                   </span>
-                  <span className="text-xs text-stone-400 font-bold">
+                  <span className="text-xs text-stone-400 font-semibold">
                     ETA ~{activeOrder.effective_prep_minutes}m
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-xs text-stone-400">Active Table Bill</span>
-                  <span className="text-2xl font-extrabold text-white">
+                  <span className="text-xs text-stone-400">Running Table Tab</span>
+                  <span className="text-2xl font-bold text-white">
                     {formatPaise(activeOrder.total_paise)}
                   </span>
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setActiveTab("order")}
-                    className="flex-1 py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition"
+                    onClick={() => {
+                      setMealCompletedScreen(false);
+                      setActiveTab("order");
+                    }}
+                    className="flex-1 py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition"
                   >
-                    Track & Repeat
+                    1-Tap Repeat Roti
                   </button>
                   <button
-                    disabled={paymentBusy}
-                    onClick={() => handlePayOrder("upi")}
-                    className="flex-1 py-2.5 rounded-full bg-[#FF6B4A] text-white text-xs font-bold transition"
+                    onClick={() => {
+                      setMealCompletedScreen(true);
+                      setActiveTab("order");
+                    }}
+                    className="flex-1 py-2.5 rounded-full bg-[#9FE870] text-[#141414] text-xs font-bold transition"
                   >
-                    Pay Bill
+                    Meal Complete & Bill
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Sticky Table Bag Card */}
             <div className="bg-white rounded-[32px] p-6 shadow-[0_12px_40px_rgba(20,20,20,0.05)] border border-stone-200/60 space-y-4">
               <div className="flex items-center justify-between border-b border-stone-100 pb-3">
                 <div className="flex items-center gap-2">
                   <ShoppingBag className="w-4 h-4 text-[#FF6B4A]" />
-                  <h3 className="text-base font-extrabold text-[#141414]">
+                  <h3 className="text-base font-bold text-[#141414]">
                     Table #{selectedTableNumber} Bag
                   </h3>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full bg-[#F7F5F2] text-xs font-extrabold text-[#141414]">
+                <span className="px-2.5 py-0.5 rounded-full bg-[#F7F5F2] text-xs font-bold text-[#141414]">
                   {totalCartItems} items
                 </span>
               </div>
@@ -1653,10 +1935,10 @@ export const CustomerView: React.FC = () => {
                           className="w-11 h-11 object-contain shrink-0"
                         />
                         <div className="min-w-0">
-                          <div className="text-xs font-extrabold text-[#141414] truncate">
+                          <div className="text-xs font-semibold text-[#141414] truncate">
                             {c.name.replace(" (3D View)", "")}
                           </div>
-                          <div className="text-[11px] font-bold text-stone-400">
+                          <div className="text-[11px] font-medium text-stone-400">
                             {formatPaise(c.display_unit_paise * c.qty)}
                           </div>
                         </div>
@@ -1668,7 +1950,7 @@ export const CustomerView: React.FC = () => {
                         >
                           <Minus className="w-3 h-3" />
                         </button>
-                        <span className="text-xs font-extrabold">{c.qty}</span>
+                        <span className="text-xs font-bold">{c.qty}</span>
                         <button
                           onClick={() => updateCartQty(c.menu_item_id, c.qty + 1)}
                           className="w-5 h-5 rounded-full bg-[#141414] text-white flex items-center justify-center"
@@ -1686,31 +1968,31 @@ export const CustomerView: React.FC = () => {
                   <div className="space-y-1 text-xs">
                     <div className="flex justify-between text-stone-400">
                       <span>Subtotal</span>
-                      <span className="font-bold text-[#141414]">
+                      <span className="font-semibold text-[#141414]">
                         {formatPaise(cartPreview.subtotal_paise)}
                       </span>
                     </div>
                     {cartPreview.discount_paise > 0 && (
-                      <div className="flex justify-between text-emerald-600 font-bold">
-                        <span>5% Verified Discount</span>
+                      <div className="flex justify-between text-emerald-600 font-semibold">
+                        <span>Verified Discount</span>
                         <span>-{formatPaise(cartPreview.discount_paise)}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-stone-400">
-                      <span>GST (5%)</span>
-                      <span className="font-bold text-[#141414]">
+                      <span>GST</span>
+                      <span className="font-semibold text-[#141414]">
                         {formatPaise(cartPreview.tax_paise)}
                       </span>
                     </div>
-                    <div className="flex justify-between text-base font-extrabold text-[#141414] pt-1.5 border-t border-stone-100">
-                      <span>Total Payable</span>
+                    <div className="flex justify-between text-base font-bold text-[#141414] pt-1.5 border-t border-stone-100">
+                      <span>Order Total</span>
                       <span>{formatPaise(cartPreview.total_paise)}</span>
                     </div>
                   </div>
 
                   <button
                     onClick={handlePlaceOrder}
-                    className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs shadow-lg transition"
+                    className="w-full py-3.5 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-semibold text-xs shadow-lg transition"
                   >
                     Send Order to Kitchen →
                   </button>
@@ -1754,7 +2036,7 @@ export const CustomerView: React.FC = () => {
                 >
                   {nav.icon}
                   {nav.badge ? (
-                    <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-white text-[#141414] text-[9px] font-black flex items-center justify-center">
+                    <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-white text-[#141414] text-[9px] font-bold flex items-center justify-center">
                       {nav.badge}
                     </span>
                   ) : nav.dot ? (
@@ -1773,10 +2055,10 @@ export const CustomerView: React.FC = () => {
           <div className="bg-white rounded-[36px] max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#FF6B4A]">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#FF6B4A]">
                   Interactive 3D Dish Preview
                 </span>
-                <h3 className="text-lg font-extrabold text-[#141414]">
+                <h3 className="text-lg font-bold text-[#141414]">
                   {active3DItem.name.replace(" (3D View)", "")}
                 </h3>
               </div>
@@ -1804,7 +2086,7 @@ export const CustomerView: React.FC = () => {
             </p>
 
             <div className="flex items-center justify-between pt-2">
-              <span className="text-xl font-extrabold text-[#141414]">
+              <span className="text-xl font-bold text-[#141414]">
                 {formatPaise(active3DItem.display_price_paise)}
               </span>
               <button
@@ -1819,7 +2101,7 @@ export const CustomerView: React.FC = () => {
                   setActive3DItem(null);
                   showToast("Added to table bag");
                 }}
-                className="px-6 py-3 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold text-xs transition"
+                className="px-6 py-3 rounded-full bg-[#141414] hover:bg-[#FF6B4A] text-white font-semibold text-xs transition"
               >
                 + Add to Bag
               </button>
@@ -1834,10 +2116,10 @@ export const CustomerView: React.FC = () => {
           <div className="bg-white rounded-[36px] max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#FF6B4A]">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#FF6B4A]">
                   Zero-Wait Service
                 </span>
-                <h3 className="text-lg font-extrabold text-[#141414]">
+                <h3 className="text-lg font-bold text-[#141414]">
                   1-Tap Table Essentials
                 </h3>
               </div>
@@ -1861,7 +2143,7 @@ export const CustomerView: React.FC = () => {
                 <button
                   key={req.id}
                   onClick={() => handleServiceRequest(req.id as any, req.label)}
-                  className="p-3.5 rounded-2xl bg-[#FAF8F6] hover:bg-[#141414] text-[#141414] hover:text-white font-bold text-left transition"
+                  className="p-3.5 rounded-2xl bg-[#FAF8F6] hover:bg-[#141414] text-[#141414] hover:text-white font-semibold text-left transition"
                 >
                   {req.label}
                 </button>
@@ -1871,17 +2153,17 @@ export const CustomerView: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 3: Facilities & Washrooms */}
+      {/* MODAL 3: Interactive 2D Floor Map Showing Customer's Table -> Washroom & Handwash Path */}
       {facilitiesModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-[36px] max-w-md w-full p-6 shadow-2xl space-y-4">
+          <div className="bg-white rounded-[36px] max-w-lg w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#FF6B4A]">
-                  Guest Guide
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#FF6B4A]">
+                  Live Spatial Navigation from Table #{selectedTableNumber}
                 </span>
-                <h3 className="text-lg font-extrabold text-[#141414]">
-                  {restaurant?.name} — Facilities
+                <h3 className="text-lg font-bold text-[#141414]">
+                  {restaurant?.name} — 2D Washroom & Facility Map
                 </h3>
               </div>
               <button
@@ -1892,35 +2174,66 @@ export const CustomerView: React.FC = () => {
               </button>
             </div>
 
-            <p className="text-xs text-stone-500 leading-relaxed">
-              {restaurant?.description}
-            </p>
+            {/* Visual 2D Floor Plan Highlighting "You Are Here (Table #X)" and Washroom Pin */}
+            <div className="relative h-56 rounded-2xl bg-[#EEF2EE] border border-stone-200 overflow-hidden">
+              {(restaurant?.floor_pins || []).map((pin: any, idx: number) => (
+                <div
+                  key={idx}
+                  style={{ left: `${pin.x_pct}%`, top: `${pin.y_pct}%` }}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 z-20"
+                >
+                  <span
+                    className={`px-2.5 py-1 rounded-xl text-[10px] font-bold shadow-md whitespace-nowrap ${
+                      pin.pin_type === "washroom"
+                        ? "bg-indigo-600 text-white"
+                        : pin.pin_type === "handwash"
+                        ? "bg-sky-600 text-white"
+                        : "bg-[#222423] text-[#9FE870]"
+                    }`}
+                  >
+                    {pin.pin_type === "washroom"
+                      ? "🚻 Washroom"
+                      : pin.pin_type === "handwash"
+                      ? "🧼 Handwash"
+                      : pin.label}
+                  </span>
+                </div>
+              ))}
 
-            <div className="space-y-2.5 text-xs">
-              <div className="p-3.5 rounded-2xl bg-[#FAF8F6]">
-                <div className="font-extrabold text-[#141414] mb-0.5">
-                  🚻 Restroom / Washroom Directions
+              {tables.map((t: any) => {
+                const isMyTable = t.table_number === selectedTableNumber;
+                return (
+                  <div
+                    key={t.table_id}
+                    style={{ left: `${t.x_pct || 30}%`, top: `${t.y_pct || 50}%` }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-xl flex flex-col items-center justify-center transition ${
+                      isMyTable
+                        ? "w-16 h-12 bg-[#FF6B4A] text-white font-bold shadow-lg ring-4 ring-[#FF6B4A]/30 z-30"
+                        : "w-10 h-10 bg-white/80 text-stone-500 border border-stone-300 text-[10px]"
+                    }`}
+                  >
+                    <span className="text-[10px] font-bold">T#{t.table_number}</span>
+                    {isMyTable && <span className="text-[8px]">YOU ARE HERE</span>}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="p-3 rounded-2xl bg-[#FAF8F6]">
+                <div className="font-bold text-[#141414] mb-0.5">
+                  🚻 Washroom Walking Directions
                 </div>
                 <div className="text-stone-500">
                   {restaurant?.facilities_info?.restroom_directions}
                 </div>
               </div>
-              <div className="p-3.5 rounded-2xl bg-[#FAF8F6]">
-                <div className="font-extrabold text-[#141414] mb-0.5">
-                  🧼 Handwash & Hygiene Station
+              <div className="p-3 rounded-2xl bg-[#FAF8F6]">
+                <div className="font-bold text-[#141414] mb-0.5">
+                  🧼 Handwash Station
                 </div>
                 <div className="text-stone-500">
                   {restaurant?.facilities_info?.handwash_station}
-                </div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-[#FAF8F6] flex items-center justify-between">
-                <div>
-                  <div className="font-extrabold text-[#141414] flex items-center gap-1">
-                    <Wifi className="w-3.5 h-3.5 text-[#FF6B4A]" /> Guest Wi-Fi
-                  </div>
-                  <div className="text-stone-500">
-                    {restaurant?.facilities_info?.wifi_ssid}
-                  </div>
                 </div>
               </div>
             </div>

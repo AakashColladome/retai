@@ -14,15 +14,15 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: "http://127.0.0.1:8001",
         changeOrigin: true,
       },
       "/ws": {
-        target: "ws://127.0.0.1:8000",
+        target: "ws://127.0.0.1:8001",
         ws: true,
       },
       "/health": {
-        target: "http://127.0.0.1:8000",
+        target: "http://127.0.0.1:8001",
         changeOrigin: true,
       },
     },
@@ -33,15 +33,15 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: "http://127.0.0.1:8001",
         changeOrigin: true,
       },
       "/ws": {
-        target: "ws://127.0.0.1:8000",
+        target: "ws://127.0.0.1:8001",
         ws: true,
       },
       "/health": {
-        target: "http://127.0.0.1:8000",
+        target: "http://127.0.0.1:8001",
         changeOrigin: true,
       },
     },

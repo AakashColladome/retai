@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DemoPresenterBar, PATH_TO_ROLE } from "@/components/DemoPresenterBar";
+import { RoleGuideBot } from "@/components/RoleGuideBot";
 import { apiFetch, buildWsUrl } from "@/lib/api";
 import { applyTenantThemeVars, playAlertChime } from "@/lib/utils";
 import { AppRole, useAppStore } from "@/store/useAppStore";
@@ -16,12 +17,12 @@ export const App: React.FC = () => {
     activeRole,
     staffToken,
     activeSession,
+    selectedTableNumber,
     setActiveRole,
     setStaffAuth,
     setLastAmberAlert,
   } = useAppStore();
 
-  // Sync URL pathname (/customer, /kitchen, /manager, /owner, /super-admin) with active portal role
   useEffect(() => {
     const syncFromPath = () => {
       const path = window.location.pathname.toLowerCase();
@@ -50,7 +51,6 @@ export const App: React.FC = () => {
     return () => window.removeEventListener("popstate", syncFromPath);
   }, [activeRestaurantId]);
 
-  // Fetch active tenant config and apply CSS theme variables
   const { data: restaurant } = useQuery<any>({
     queryKey: ["restaurant", activeRestaurantId],
     queryFn: () => apiFetch(`/api/restaurants/${activeRestaurantId}`),
@@ -62,7 +62,6 @@ export const App: React.FC = () => {
     }
   }, [restaurant]);
 
-  // Ensure a valid demo staff token is available for WebSocket & staff views
   useEffect(() => {
     if (!staffToken) {
       apiFetch("/api/auth/demo-switch", {
@@ -79,7 +78,6 @@ export const App: React.FC = () => {
     }
   }, [activeRestaurantId, staffToken, activeRole]);
 
-  // Connect to isolated per-restaurant WebSocket channel (/ws/{restaurant_id}?token=...)
   useEffect(() => {
     const wsToken =
       activeRole === "customer"
@@ -124,7 +122,9 @@ export const App: React.FC = () => {
           type === "SERVICE_REQUEST_UPDATED"
         ) {
           if (type === "SERVICE_REQUEST_CREATED") playAlertChime("service");
-          queryClient.invalidateQueries({ queryKey: ["service-requests", activeRestaurantId] });
+          queryClient.invalidateQueries({
+            queryKey: ["service-requests", activeRestaurantId],
+          });
         } else if (type === "TENANT_CONFIG_UPDATED" || type === "MENU_UPDATED") {
           queryClient.invalidateQueries({ queryKey: ["restaurant", activeRestaurantId] });
           queryClient.invalidateQueries({ queryKey: ["restaurants"] });
@@ -148,7 +148,7 @@ export const App: React.FC = () => {
   }, [activeRestaurantId, activeRole, staffToken, activeSession?.session_token, queryClient]);
 
   return (
-    <div className="min-h-screen bg-[#F7F5F2] text-[#141414] flex flex-col">
+    <div className="min-h-screen bg-[#F4F6F4] text-[#1E201F] flex flex-col font-sans">
       <main className="flex-1">
         {activeRole === "customer" && <CustomerView />}
         {activeRole === "kitchen" && <KitchenKDSView />}
@@ -157,6 +157,13 @@ export const App: React.FC = () => {
         )}
         {activeRole === "super_admin" && <SuperAdminView />}
       </main>
+      <RoleGuideBot
+        role={activeRole}
+        restaurantName={restaurant?.name || "Shree Ram Dhaba"}
+        tableNumber={selectedTableNumber}
+        phoneDiscountPct={(restaurant?.phone_discount_bps ?? 500) / 100}
+        reviewDiscountPct={(restaurant?.google_review_discount_bps ?? 200) / 100}
+      />
       <DemoPresenterBar />
     </div>
   );

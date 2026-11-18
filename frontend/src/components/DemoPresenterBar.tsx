@@ -119,6 +119,12 @@ export const DemoPresenterBar: React.FC = () => {
     }
   };
 
+  // CCTV Simulation only shown to Owner, Manager & Super Admin (NEVER Kitchen!)
+  const showCctvInDrawer =
+    activeRole === "owner" ||
+    activeRole === "manager" ||
+    activeRole === "super_admin";
+
   const portals: {
     id: AppRole;
     title: string;
@@ -129,35 +135,35 @@ export const DemoPresenterBar: React.FC = () => {
     {
       id: "customer",
       title: "Customer App",
-      subtitle: "Mobile QR & Table WebApp",
+      subtitle: "QR / Table Ordering & Google Review Bill",
       path: "/customer",
       icon: <Smartphone className="w-4 h-4" />,
     },
     {
       id: "kitchen",
       title: "Kitchen Portal (KDS)",
-      subtitle: "Live Tickets & Prep Timer",
+      subtitle: "Cooking Queue, Repeat Chapati & Prep Timer",
       path: "/kitchen",
       icon: <ChefHat className="w-4 h-4" />,
     },
     {
       id: "manager",
       title: "Floor Manager Portal",
-      subtitle: "Red / Green / Amber Table Map",
+      subtitle: "Occupancy Map, 2D Floor & Discount Rules",
       path: "/manager",
       icon: <LayoutGrid className="w-4 h-4" />,
     },
     {
       id: "owner",
       title: "Restaurant Admin Portal",
-      subtitle: "Analytics, Settlements & Menu",
+      subtitle: "Floor Setup, Washrooms, RBAC & Settlements",
       path: "/owner",
       icon: <TrendingUp className="w-4 h-4" />,
     },
     {
       id: "super_admin",
       title: "Super Admin Portal",
-      subtitle: "Tenants & Profit-Share Engine",
+      subtitle: "Onboarding & Confidential Platform Markup",
       path: "/super-admin",
       icon: <Crown className="w-4 h-4" />,
     },
@@ -167,20 +173,19 @@ export const DemoPresenterBar: React.FC = () => {
 
   return (
     <>
-      {/* Discrete Floating Corner Pill — Never Clutters the Screen */}
-      <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-2">
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-2 font-sans">
         {toast && (
-          <div className="px-4 py-2.5 rounded-2xl bg-[#141414] text-white text-xs font-semibold shadow-2xl flex items-center gap-2 border border-white/10">
-            <span className="w-2 h-2 rounded-full bg-[#FF6B4A]" />
+          <div className="px-4 py-2.5 rounded-2xl bg-[#222423] text-white text-xs font-semibold shadow-2xl flex items-center gap-2 border border-white/10">
+            <span className="w-2 h-2 rounded-full bg-[#9FE870]" />
             <span>{toast}</span>
           </div>
         )}
 
         <button
           onClick={() => setDrawerOpen((v) => !v)}
-          className="group flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-[#141414] text-white text-xs font-bold shadow-[0_14px_34px_rgba(20,20,20,0.28)] hover:scale-[1.02] active:scale-95 transition-all border border-white/10"
+          className="group flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-[#222423] text-white text-xs font-semibold shadow-[0_14px_34px_rgba(20,20,20,0.28)] hover:scale-[1.02] active:scale-95 transition-all border border-white/10"
         >
-          <span className="w-6 h-6 rounded-full bg-[#FF6B4A] text-white flex items-center justify-center">
+          <span className="w-6 h-6 rounded-full bg-[#9FE870] text-[#1E201F] flex items-center justify-center">
             <Layers className="w-3.5 h-3.5" />
           </span>
           <span>Portal: {currentPortal.title}</span>
@@ -192,31 +197,29 @@ export const DemoPresenterBar: React.FC = () => {
         </button>
       </div>
 
-      {/* Clean Orbix-Style Portal Switcher Drawer */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-4">
-          <div className="bg-[#FAF8F6] border border-stone-200/80 rounded-[32px] max-w-lg w-full p-6 shadow-2xl space-y-5 text-[#141414]">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-4 font-sans">
+          <div className="bg-[#F4F6F4] border border-stone-200/80 rounded-[32px] max-w-lg w-full p-6 shadow-2xl space-y-5 text-[#1E201F]">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#FF6B4A]">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#65A30D]">
                   Multi-Portal Architecture
                 </span>
-                <h3 className="text-xl font-extrabold text-[#141414]">
+                <h3 className="text-lg font-bold text-[#1E201F]">
                   Switch Active Portal or Restaurant
                 </h3>
               </div>
               <button
                 onClick={() => setDrawerOpen(false)}
-                className="w-9 h-9 rounded-full bg-white border border-stone-200 flex items-center justify-center text-stone-500 hover:text-[#141414]"
+                className="w-9 h-9 rounded-full bg-white border border-stone-200 flex items-center justify-center text-stone-500 hover:text-[#1E201F]"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Tenant Switcher */}
             <div className="bg-white rounded-2xl p-3.5 border border-stone-200/60 space-y-2">
-              <div className="text-xs font-bold text-stone-400 flex items-center gap-1.5">
-                <Store className="w-3.5 h-3.5 text-[#FF6B4A]" />
+              <div className="text-[11px] font-bold text-stone-400 flex items-center gap-1.5">
+                <Store className="w-3.5 h-3.5 text-[#65A30D]" />
                 ACTIVE RESTAURANT TENANT
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -228,19 +231,21 @@ export const DemoPresenterBar: React.FC = () => {
                       onClick={() => handleTenantSwitch(r.restaurant_id)}
                       className={`p-3 rounded-xl text-left transition border ${
                         active
-                          ? "bg-[#141414] text-white border-[#141414]"
-                          : "bg-[#FAF8F6] text-[#141414] border-stone-200 hover:border-stone-300"
+                          ? "bg-[#222423] text-white border-[#222423]"
+                          : "bg-[#F4F6F4] text-[#1E201F] border-stone-200 hover:border-stone-300"
                       }`}
                     >
                       <div className="font-bold text-xs truncate">{r.name}</div>
                       <div
                         className={`text-[10px] mt-0.5 ${
-                          active ? "text-[#FF6B4A]" : "text-stone-500"
+                          active ? "text-[#9FE870]" : "text-stone-500"
                         }`}
                       >
-                        {r.billing_model === "profit_share"
-                          ? `Profit-Share (${(r.markup_bps / 100).toFixed(0)}% Hidden Markup)`
-                          : "One-Time + AMC Plan"}
+                        {activeRole === "super_admin" && r.billing_model
+                          ? r.billing_model === "profit_share"
+                            ? `Profit-Share (${(r.markup_bps / 100).toFixed(0)}%)`
+                            : "One-Time + AMC"
+                          : `Mobile ${(r.phone_discount_bps ?? 500) / 100}% • Review +${(r.google_review_discount_bps ?? 200) / 100}%`}
                       </div>
                     </button>
                   );
@@ -248,9 +253,10 @@ export const DemoPresenterBar: React.FC = () => {
               </div>
             </div>
 
-            {/* 5 Dedicated Portals List */}
             <div className="space-y-2">
-              <div className="text-xs font-bold text-stone-400">SEPARATE ROLE PORTALS</div>
+              <div className="text-[11px] font-bold text-stone-400">
+                SEPARATE ROLE PORTALS
+              </div>
               <div className="space-y-2">
                 {portals.map((p) => {
                   const isActive = activeRole === p.id;
@@ -259,7 +265,7 @@ export const DemoPresenterBar: React.FC = () => {
                       key={p.id}
                       className={`p-3 rounded-2xl border flex items-center justify-between transition ${
                         isActive
-                          ? "bg-white border-[#FF6B4A] shadow-sm"
+                          ? "bg-white border-[#222423] shadow-xs"
                           : "bg-white/70 border-stone-200/70 hover:bg-white"
                       }`}
                     >
@@ -268,22 +274,22 @@ export const DemoPresenterBar: React.FC = () => {
                         className="flex items-center gap-3 flex-1 text-left"
                       >
                         <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center ${
                             isActive
-                              ? "bg-[#FF6B4A] text-white"
-                              : "bg-[#F3F1ED] text-[#141414]"
+                              ? "bg-[#222423] text-[#9FE870]"
+                              : "bg-[#F4F6F4] text-[#1E201F]"
                           }`}
                         >
                           {p.icon}
                         </div>
                         <div>
-                          <div className="font-bold text-sm text-[#141414] flex items-center gap-2">
+                          <div className="font-bold text-xs text-[#1E201F] flex items-center gap-2">
                             <span>{p.title}</span>
-                            <code className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#F3F1ED] text-stone-600">
+                            <code className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#F4F6F4] text-stone-600">
                               {p.path}
                             </code>
                           </div>
-                          <div className="text-xs text-stone-400">{p.subtitle}</div>
+                          <div className="text-[11px] text-stone-400">{p.subtitle}</div>
                         </div>
                       </button>
 
@@ -291,7 +297,7 @@ export const DemoPresenterBar: React.FC = () => {
                         href={p.path}
                         target="_blank"
                         rel="noreferrer"
-                        className="p-2 rounded-full hover:bg-stone-100 text-stone-400 hover:text-[#141414]"
+                        className="p-2 rounded-full hover:bg-stone-100 text-stone-400 hover:text-[#1E201F]"
                         title={`Open ${p.title} in new tab`}
                       >
                         <ExternalLink className="w-4 h-4" />
@@ -302,52 +308,55 @@ export const DemoPresenterBar: React.FC = () => {
               </div>
             </div>
 
-            {/* Simulate CCTV Quick Control */}
-            <div className="bg-white rounded-2xl p-3.5 border border-stone-200/60 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center">
-                  <Camera className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-[#141414]">Simulate CCTV Seating</div>
-                  <div className="text-[11px] text-stone-400">
-                    Marks table occupied (`source="cctv"`)
+            {showCctvInDrawer && (
+              <div className="bg-white rounded-2xl p-3.5 border border-stone-200/60 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-[#F4F6F4] text-[#1E201F] flex items-center justify-center">
+                    <Camera className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-[#1E201F]">
+                      Simulate CCTV Seating
+                    </div>
+                    <div className="text-[11px] text-stone-400">
+                      Owner / Manager / Super Admin only
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-1.5 text-xs">
-                <select
-                  value={cctvTable}
-                  onChange={(e) => setCctvTable(Number(e.target.value))}
-                  className="bg-[#FAF8F6] border border-stone-200 rounded-xl px-2.5 py-1.5 font-semibold"
-                >
-                  {[1, 2, 3, 4, 5, 6].map((n) => (
-                    <option key={n} value={n}>
-                      Table #{n}
-                    </option>
-                  ))}
-                </select>
-                <div className="flex items-center bg-[#FAF8F6] border border-stone-200 rounded-xl px-2 py-1.5">
-                  <Users className="w-3.5 h-3.5 text-stone-400 mr-1" />
-                  <input
-                    type="number"
-                    min={1}
-                    max={12}
-                    value={cctvGuests}
-                    onChange={(e) => setCctvGuests(Math.max(1, Number(e.target.value)))}
-                    className="w-8 bg-transparent font-semibold text-center focus:outline-none"
-                  />
+                <div className="flex items-center gap-1.5 text-xs">
+                  <select
+                    value={cctvTable}
+                    onChange={(e) => setCctvTable(Number(e.target.value))}
+                    className="bg-[#F4F6F4] border border-stone-200 rounded-xl px-2.5 py-1.5 font-semibold"
+                  >
+                    {[1, 2, 3, 4, 5, 6].map((n) => (
+                      <option key={n} value={n}>
+                        Table #{n}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center bg-[#F4F6F4] border border-stone-200 rounded-xl px-2 py-1.5">
+                    <Users className="w-3.5 h-3.5 text-stone-400 mr-1" />
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={cctvGuests}
+                      onChange={(e) => setCctvGuests(Math.max(1, Number(e.target.value)))}
+                      className="w-8 bg-transparent font-semibold text-center focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    disabled={cctvBusy}
+                    onClick={handleSimulateCctv}
+                    className="px-3.5 py-1.5 rounded-xl bg-[#222423] text-[#9FE870] font-bold transition"
+                  >
+                    {cctvBusy ? "..." : "Trigger"}
+                  </button>
                 </div>
-                <button
-                  disabled={cctvBusy}
-                  onClick={handleSimulateCctv}
-                  className="px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#FF6B4A] text-white font-bold transition"
-                >
-                  {cctvBusy ? "..." : "Trigger"}
-                </button>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}

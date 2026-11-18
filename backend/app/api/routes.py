@@ -1,20 +1,36 @@
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+import httpx
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.security import (
+    bearer_scheme,
     create_access_token,
     create_session_token,
-    get_current_claims,
+    decode_token,
     require_roles,
     validate_ws_token,
     verify_password,
 )
 from app.models.documents import (
+    DEFAULT_FLOOR_PINS,
+    DEFAULT_RBAC,
     Customer,
     FacilitiesInfo,
+    FloorPin,
     LedgerEntry,
     MenuItem,
     Order,
@@ -36,9 +52,23 @@ from app.services.ws_manager import ws_manager
 
 router = APIRouter()
 
+# In-memory cache for ElevenLabs TTS audio bytes so repeated prompts play with zero latency
+TTS_AUDIO_CACHE: Dict[str, bytes] = {}
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def get_optional_claims(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> Optional[dict]:
+    if not credentials or not credentials.credentials:
+        return None
+    try:
+        return decode_token(credentials.credentials)
+    except Exception:
+        return None
 
 
 # --- Request / Response Schemas ---
@@ -70,6 +100,12 @@ class VerifyPhoneRequest(BaseModel):
     otp: str
     dpdp_consent: bool
     occasion: Optional[str] = None
+
+
+class GoogleReviewRequest(BaseModel):
+    qr_token: str
+    rating: int = Field(default=5, ge=1, le=5)
+    review_text: str = ""
 
 
 class CartLineInput(BaseModel):
@@ -142,8 +178,41 @@ class UpdateRestaurantConfigRequest(BaseModel):
     markup_bps: Optional[int] = Field(default=None, ge=0, le=3000)
     one_time_fee_paise: Optional[int] = Field(default=None, ge=0)
     amc_fee_paise: Optional[int] = Field(default=None, ge=0)
+    phone_discount_bps: Optional[int] = Field(default=None, ge=0, le=2500)
+    google_review_discount_bps: Optional[int] = Field(default=None, ge=0, le=2000)
     gst_bps: Optional[int] = Field(default=None, ge=0, le=2800)
     amber_threshold_seconds: Optional[int] = Field(default=None, ge=15, le=3600)
+
+
+class UpdateDiscountsRequest(BaseModel):
+    phone_discount_bps: int = Field(ge=0, le=2500)
+    google_review_discount_bps: int = Field(ge=0, le=2000)
+
+
+class TableCoordinateUpdate(BaseModel):
+    table_number: int
+    zone: Optional[str] = None
+    capacity: Optional[int] = None
+    x_pct: int = Field(ge=5, le=95)
+    y_pct: int = Field(ge=5, le=95)
+
+
+class FloorLayoutUpdateRequest(BaseModel):
+    tables: Optional[List[TableCoordinateUpdate]] = None
+    floor_pins: Optional[List[FloorPin]] = None
+    facilities_info: Optional[FacilitiesInfo] = None
+
+
+class CreateTableRequest(BaseModel):
+    table_number: int
+    zone: str = "Main Hall"
+    capacity: int = 4
+    x_pct: int = 30
+    y_pct: int = 40
+
+
+class RBACUpdateRequest(BaseModel):
+    rbac_permissions: Dict[str, Dict[str, bool]]
 
 
 class CreateRestaurantRequest(BaseModel):
@@ -176,6 +245,42 @@ class CreateMenuItemRequest(BaseModel):
     upsell_tags: List[str] = []
 
 
+class VoiceTTSRequest(BaseModel):
+    text: str
+    lang: Literal["hi", "en"] = "hi"
+
+
+def _serialize_restaurant(r: Restaurant, is_super_admin: bool = False) -> Dict[str, Any]:
+    floor_pins = getattr(r, "floor_pins", None) or DEFAULT_FLOOR_PINS
+    rbac_perms = getattr(r, "rbac_permissions", None) or DEFAULT_RBAC
+    phone_bps = getattr(r, "phone_discount_bps", 500)
+    review_bps = getattr(r, "google_review_discount_bps", 200)
+
+    data: Dict[str, Any] = {
+        "id": str(r.id),
+        "restaurant_id": r.restaurant_id,
+        "slug": r.slug,
+        "name": r.name,
+        "tagline": r.tagline,
+        "description": r.description,
+        "facilities_info": r.facilities_info.model_dump(),
+        "floor_pins": [p.model_dump() if hasattr(p, "model_dump") else p for p in floor_pins],
+        "rbac_permissions": rbac_perms,
+        "theme": r.theme.model_dump(),
+        "phone_discount_bps": phone_bps,
+        "google_review_discount_bps": review_bps,
+        "gst_bps": r.gst_bps,
+        "amber_threshold_seconds": r.amber_threshold_seconds,
+    }
+    # Platform commercial charges are strictly visible ONLY to Super Admin!
+    if is_super_admin:
+        data["billing_model"] = r.billing_model
+        data["markup_bps"] = r.markup_bps
+        data["one_time_fee_paise"] = r.one_time_fee_paise
+        data["amc_fee_paise"] = r.amc_fee_paise
+    return data
+
+
 # --- Auth Endpoints ---
 
 
@@ -183,7 +288,9 @@ class CreateMenuItemRequest(BaseModel):
 async def login(req: LoginRequest) -> Dict[str, Any]:
     user = await User.find_one(User.email == req.email)
     if not user or not verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
 
     token = create_access_token(
         subject=str(user.id),
@@ -237,50 +344,24 @@ async def demo_switch_role(req: DemoSwitchRequest) -> Dict[str, Any]:
 
 
 @router.get("/api/restaurants")
-async def list_restaurants() -> List[Dict[str, Any]]:
+async def list_restaurants(
+    claims: Optional[dict] = Depends(get_optional_claims),
+) -> List[Dict[str, Any]]:
+    is_sa = bool(claims and claims.get("role") == "super_admin")
     restaurants = await Restaurant.find_all().to_list()
-    return [
-        {
-            "id": str(r.id),
-            "restaurant_id": r.restaurant_id,
-            "slug": r.slug,
-            "name": r.name,
-            "tagline": r.tagline,
-            "description": r.description,
-            "facilities_info": r.facilities_info.model_dump(),
-            "theme": r.theme.model_dump(),
-            "billing_model": r.billing_model,
-            "markup_bps": r.markup_bps,
-            "one_time_fee_paise": r.one_time_fee_paise,
-            "amc_fee_paise": r.amc_fee_paise,
-            "gst_bps": r.gst_bps,
-            "amber_threshold_seconds": r.amber_threshold_seconds,
-        }
-        for r in restaurants
-    ]
+    return [_serialize_restaurant(r, is_super_admin=is_sa) for r in restaurants]
 
 
 @router.get("/api/restaurants/{restaurant_id}")
-async def get_restaurant(restaurant_id: str) -> Dict[str, Any]:
+async def get_restaurant(
+    restaurant_id: str,
+    claims: Optional[dict] = Depends(get_optional_claims),
+) -> Dict[str, Any]:
     r = await Restaurant.find_one(Restaurant.restaurant_id == restaurant_id)
     if not r:
         raise HTTPException(status_code=404, detail="Restaurant not found")
-    return {
-        "id": str(r.id),
-        "restaurant_id": r.restaurant_id,
-        "slug": r.slug,
-        "name": r.name,
-        "tagline": r.tagline,
-        "description": r.description,
-        "facilities_info": r.facilities_info.model_dump(),
-        "theme": r.theme.model_dump(),
-        "billing_model": r.billing_model,
-        "markup_bps": r.markup_bps,
-        "one_time_fee_paise": r.one_time_fee_paise,
-        "amc_fee_paise": r.amc_fee_paise,
-        "gst_bps": r.gst_bps,
-        "amber_threshold_seconds": r.amber_threshold_seconds,
-    }
+    is_sa = bool(claims and claims.get("role") == "super_admin")
+    return _serialize_restaurant(r, is_super_admin=is_sa)
 
 
 @router.post("/api/restaurants")
@@ -314,16 +395,19 @@ async def create_restaurant(
     await new_rest.insert()
 
     for idx in range(1, req.table_count + 1):
+        col = (idx - 1) % 3
+        row = (idx - 1) // 3
         await Table(
             restaurant_id=slug,
             table_number=idx,
             label=f"Table {idx}",
             capacity=4,
             zone="Main Hall",
+            x_pct=20 + col * 24,
+            y_pct=30 + row * 28,
             qr_token=f"{slug}-table-{idx}-token",
         ).insert()
 
-    # Seed 3 starter dishes so newly onboarded tenant is immediately usable
     starter_dishes = [
         MenuItem(
             restaurant_id=slug,
@@ -338,6 +422,20 @@ async def create_restaurant(
             image_url="/images/dishes/maharaja-thali.svg",
             model_3d_url="/models/thali_platter.glb",
             upsell_tags=["family", "birthday"],
+            is_bestseller=True,
+        ),
+        MenuItem(
+            restaurant_id=slug,
+            name="Tawa Phulka Chapati (Desi Ghee)",
+            name_hi="chapati, roti, phulka, tawa roti, चपाती, रोटी",
+            category="Tandoori Breads",
+            description="Soft whole-wheat phulka chapati brushed with pure desi ghee.",
+            ingredients=["Sharbati Whole Wheat", "Pure Desi Ghee"],
+            base_price_paise=2500,
+            prep_time_minutes=3,
+            is_veg=True,
+            image_url="/images/dishes/butter-naan.svg",
+            upsell_tags=["family", "quick_lunch"],
             is_bestseller=True,
         ),
         MenuItem(
@@ -358,7 +456,7 @@ async def create_restaurant(
     ]
     await MenuItem.insert_many(starter_dishes)
 
-    return await get_restaurant(slug)
+    return _serialize_restaurant(new_rest, is_super_admin=True)
 
 
 @router.patch("/api/restaurants/{restaurant_id}/config")
@@ -388,8 +486,12 @@ async def update_restaurant_config(
         r.amber_threshold_seconds = req.amber_threshold_seconds
     if req.gst_bps is not None:
         r.gst_bps = req.gst_bps
+    if req.phone_discount_bps is not None:
+        r.phone_discount_bps = req.phone_discount_bps
+    if req.google_review_discount_bps is not None:
+        r.google_review_discount_bps = req.google_review_discount_bps
 
-    # Billing model & hidden markup can be updated by super_admin (or in demo mode)
+    # Platform billing model & hidden markup can ONLY be modified by super_admin
     if claims.get("role") == "super_admin":
         if req.billing_model is not None:
             r.billing_model = req.billing_model
@@ -401,7 +503,119 @@ async def update_restaurant_config(
             r.amc_fee_paise = req.amc_fee_paise
 
     await r.save()
-    updated = await get_restaurant(restaurant_id)
+    is_sa = claims.get("role") == "super_admin"
+    updated = _serialize_restaurant(r, is_super_admin=is_sa)
+    await ws_manager.broadcast(restaurant_id, "TENANT_CONFIG_UPDATED", updated)
+    return updated
+
+
+@router.patch("/api/restaurants/{restaurant_id}/discounts")
+async def update_discount_rules(
+    restaurant_id: str,
+    req: UpdateDiscountsRequest,
+    claims: dict = Depends(require_roles(["super_admin", "owner", "manager"])),
+) -> Dict[str, Any]:
+    """Allows Restaurant Admin (owner) & Manager to configure Mobile % and Google Review % discounts."""
+    r = await Restaurant.find_one(Restaurant.restaurant_id == restaurant_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    r.phone_discount_bps = req.phone_discount_bps
+    r.google_review_discount_bps = req.google_review_discount_bps
+    await r.save()
+
+    updated = _serialize_restaurant(r, is_super_admin=(claims.get("role") == "super_admin"))
+    await ws_manager.broadcast(restaurant_id, "TENANT_CONFIG_UPDATED", updated)
+    return updated
+
+
+@router.patch("/api/restaurants/{restaurant_id}/floor-layout")
+async def update_floor_layout(
+    restaurant_id: str,
+    req: FloorLayoutUpdateRequest,
+    claims: dict = Depends(require_roles(["super_admin", "owner", "manager"])),
+) -> Dict[str, Any]:
+    """Updates 2D Floor Map coordinates for tables and washroom/handwash/kitchen pins."""
+    r = await Restaurant.find_one(Restaurant.restaurant_id == restaurant_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    if req.floor_pins is not None:
+        r.floor_pins = req.floor_pins
+    if req.facilities_info is not None:
+        r.facilities_info = req.facilities_info
+    await r.save()
+
+    if req.tables:
+        for t_up in req.tables:
+            t_doc = await Table.find_one(
+                Table.restaurant_id == restaurant_id,
+                Table.table_number == t_up.table_number,
+            )
+            if t_doc:
+                t_doc.x_pct = t_up.x_pct
+                t_doc.y_pct = t_up.y_pct
+                if t_up.zone:
+                    t_doc.zone = t_up.zone
+                if t_up.capacity:
+                    t_doc.capacity = t_up.capacity
+                await t_doc.save()
+
+    updated = _serialize_restaurant(r, is_super_admin=(claims.get("role") == "super_admin"))
+    await ws_manager.broadcast(restaurant_id, "TENANT_CONFIG_UPDATED", updated)
+    await ws_manager.broadcast(restaurant_id, "TABLE_STATUS_CHANGED", {"restaurant_id": restaurant_id})
+    return updated
+
+
+@router.post("/api/tables/{restaurant_id}")
+async def add_new_table(
+    restaurant_id: str,
+    req: CreateTableRequest,
+    claims: dict = Depends(require_roles(["super_admin", "owner", "manager"])),
+) -> Dict[str, Any]:
+    existing = await Table.find_one(
+        Table.restaurant_id == restaurant_id,
+        Table.table_number == req.table_number,
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Table #{req.table_number} already exists")
+
+    new_t = Table(
+        restaurant_id=restaurant_id,
+        table_number=req.table_number,
+        label=f"Table {req.table_number}",
+        capacity=req.capacity,
+        zone=req.zone,
+        x_pct=req.x_pct,
+        y_pct=req.y_pct,
+        qr_token=f"{restaurant_id}-table-{req.table_number}-token",
+    )
+    await new_t.insert()
+    await ws_manager.broadcast(restaurant_id, "TABLE_STATUS_CHANGED", {"table_number": req.table_number})
+    return {
+        "table_id": str(new_t.id),
+        "table_number": new_t.table_number,
+        "zone": new_t.zone,
+        "capacity": new_t.capacity,
+        "x_pct": new_t.x_pct,
+        "y_pct": new_t.y_pct,
+        "qr_token": new_t.qr_token,
+    }
+
+
+@router.patch("/api/restaurants/{restaurant_id}/rbac")
+async def update_rbac_permissions(
+    restaurant_id: str,
+    req: RBACUpdateRequest,
+    claims: dict = Depends(require_roles(["super_admin", "owner"])),
+) -> Dict[str, Any]:
+    """Allows Restaurant Owner/Admin to control View/Edit access per department role."""
+    r = await Restaurant.find_one(Restaurant.restaurant_id == restaurant_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    r.rbac_permissions = req.rbac_permissions
+    await r.save()
+    updated = _serialize_restaurant(r, is_super_admin=(claims.get("role") == "super_admin"))
     await ws_manager.broadcast(restaurant_id, "TENANT_CONFIG_UPDATED", updated)
     return updated
 
@@ -432,8 +646,11 @@ async def get_tables_status(restaurant_id: str) -> List[Dict[str, Any]]:
 
     now = utc_now()
     result = []
-    for t in tables:
+    for idx, t in enumerate(tables):
         sess = session_by_id.get(t.active_session_id) if t.active_session_id else None
+        x_pct = getattr(t, "x_pct", 20 + (idx % 3) * 24)
+        y_pct = getattr(t, "y_pct", 28 + (idx // 3) * 26)
+
         if not sess or sess.status == "empty":
             result.append(
                 {
@@ -442,8 +659,10 @@ async def get_tables_status(restaurant_id: str) -> List[Dict[str, Any]]:
                     "label": t.label,
                     "capacity": t.capacity,
                     "zone": t.zone,
+                    "x_pct": x_pct,
+                    "y_pct": y_pct,
                     "qr_token": t.qr_token,
-                    "status": "empty",  # Red indicator
+                    "status": "empty",
                     "session": None,
                     "active_orders": [],
                 }
@@ -470,8 +689,10 @@ async def get_tables_status(restaurant_id: str) -> List[Dict[str, Any]]:
                     "label": t.label,
                     "capacity": t.capacity,
                     "zone": t.zone,
+                    "x_pct": x_pct,
+                    "y_pct": y_pct,
                     "qr_token": t.qr_token,
-                    "status": sess.status,  # "seated" (Green) or "amber" (Amber)
+                    "status": sess.status,
                     "session": {
                         "session_id": str(sess.id),
                         "status": sess.status,
@@ -481,9 +702,12 @@ async def get_tables_status(restaurant_id: str) -> List[Dict[str, Any]]:
                         "customer_name": sess.customer_name,
                         "is_phone_verified": sess.is_phone_verified,
                         "dpdp_consent": sess.dpdp_consent,
+                        "is_google_reviewed": getattr(sess, "is_google_reviewed", False),
                         "occasion": sess.occasion,
                         "seated_at": seated_at.isoformat(),
-                        "first_order_at": sess.first_order_at.isoformat() if sess.first_order_at else None,
+                        "first_order_at": (
+                            sess.first_order_at.isoformat() if sess.first_order_at else None
+                        ),
                         "seconds_seated": seconds_seated,
                         "amber_threshold_seconds": restaurant.amber_threshold_seconds,
                         "session_token": session_token,
@@ -493,7 +717,9 @@ async def get_tables_status(restaurant_id: str) -> List[Dict[str, Any]]:
                             "order_id": str(o.id),
                             "status": o.status,
                             "total_paise": o.total_paise,
-                            "estimated_prep_minutes": o.manual_prep_override_minutes or o.estimated_prep_minutes,
+                            "estimated_prep_minutes": (
+                                o.manual_prep_override_minutes or o.estimated_prep_minutes
+                            ),
                             "item_count": sum(i.qty for i in o.items),
                         }
                         for o in sess_orders
@@ -504,12 +730,7 @@ async def get_tables_status(restaurant_id: str) -> List[Dict[str, Any]]:
 
 
 @router.post("/api/sessions/start")
-async def start_table_session(
-    req: StartSessionRequest,
-    claims: Optional[dict] = Depends(
-        lambda credentials=Depends(lambda: None): None
-    ),
-) -> Dict[str, Any]:
+async def start_table_session(req: StartSessionRequest) -> Dict[str, Any]:
     table = await Table.find_one(
         Table.restaurant_id == req.restaurant_id,
         Table.table_number == req.table_number,
@@ -517,7 +738,6 @@ async def start_table_session(
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
 
-    # Validate table qr_token for customer sources (qr / tablet)
     if req.source in ("qr", "tablet"):
         if not req.qr_token or req.qr_token != table.qr_token:
             raise HTTPException(
@@ -525,7 +745,6 @@ async def start_table_session(
                 detail="Invalid or missing table qr_token",
             )
 
-    # Check if an active session already exists on this table
     existing_session: Optional[TableSession] = None
     if table.active_session_id:
         existing_session = await TableSession.get(table.active_session_id)
@@ -572,6 +791,7 @@ async def start_table_session(
         "source": session.source,
         "is_phone_verified": session.is_phone_verified,
         "dpdp_consent": session.dpdp_consent,
+        "is_google_reviewed": getattr(session, "is_google_reviewed", False),
         "customer_phone": session.customer_phone,
         "customer_name": session.customer_name,
         "occasion": session.occasion,
@@ -595,14 +815,15 @@ async def verify_session_phone(session_id: str, req: VerifyPhoneRequest) -> Dict
     if not req.dpdp_consent:
         raise HTTPException(
             status_code=400,
-            detail="DPDP Act 2023 consent is required to verify phone number and apply the 5% discount.",
+            detail="DPDP Act 2023 consent is required to verify phone number and apply the discount.",
         )
 
     cleaned_phone = "".join(ch for ch in req.phone if ch.isdigit())[-10:]
     if len(cleaned_phone) != 10:
-        raise HTTPException(status_code=400, detail="Please enter a valid 10-digit mobile number")
+        raise HTTPException(
+            status_code=400, detail="Please enter a valid 10-digit mobile number"
+        )
 
-    # Enforce DEMO_MODE check for OTP 1234
     valid_otp = False
     if settings.DEMO_MODE and req.otp.strip() == "1234":
         valid_otp = True
@@ -625,7 +846,6 @@ async def verify_session_phone(session_id: str, req: VerifyPhoneRequest) -> Dict
         session.occasion = req.occasion
     await session.save()
 
-    # Upsert customer record
     customer = await Customer.find_one(
         Customer.restaurant_id == session.restaurant_id,
         Customer.phone == cleaned_phone,
@@ -657,7 +877,6 @@ async def verify_session_phone(session_id: str, req: VerifyPhoneRequest) -> Dict
     session.customer_id = str(customer.id)
     await session.save()
 
-    # Recompute any active unpaid order on this session so 5% discount & GST on (subtotal - discount) apply
     restaurant = await Restaurant.find_one(Restaurant.restaurant_id == session.restaurant_id)
     if restaurant:
         unpaid_orders = await Order.find(
@@ -670,12 +889,15 @@ async def verify_session_phone(session_id: str, req: VerifyPhoneRequest) -> Dict
                 restaurant,
                 is_phone_verified=True,
                 dpdp_consent=True,
+                is_google_reviewed=getattr(session, "is_google_reviewed", False),
             )
             ord_doc.is_phone_verified = True
             ord_doc.customer_phone = cleaned_phone
             ord_doc.customer_id = str(customer.id)
             ord_doc.subtotal_paise = totals["subtotal_paise"]
             ord_doc.base_subtotal_paise = totals["base_subtotal_paise"]
+            ord_doc.phone_discount_paise = totals["phone_discount_paise"]
+            ord_doc.review_discount_paise = totals["review_discount_paise"]
             ord_doc.discount_paise = totals["discount_paise"]
             ord_doc.taxable_amount_paise = totals["taxable_amount_paise"]
             ord_doc.tax_paise = totals["tax_paise"]
@@ -690,9 +912,68 @@ async def verify_session_phone(session_id: str, req: VerifyPhoneRequest) -> Dict
         "customer_name": session.customer_name,
         "is_phone_verified": True,
         "dpdp_consent": True,
+        "is_google_reviewed": getattr(session, "is_google_reviewed", False),
     }
     await ws_manager.broadcast(session.restaurant_id, "SESSION_VERIFIED", payload)
     return payload
+
+
+@router.post("/api/sessions/{session_id}/google-review")
+async def submit_google_review_discount(
+    session_id: str, req: GoogleReviewRequest
+) -> Dict[str, Any]:
+    """
+    Triggered when customer completes their meal and submits a Google Review on the billing screen.
+    Unlocks the restaurant's configurable google_review_discount_bps (default +2%) server-side.
+    """
+    session = await TableSession.get(session_id)
+    if not session or session.closed_at is not None:
+        raise HTTPException(status_code=404, detail="Active table session not found")
+
+    table = await Table.get(session.table_id)
+    if not table or req.qr_token != table.qr_token:
+        raise HTTPException(status_code=403, detail="Invalid table qr_token")
+
+    session.is_google_reviewed = True
+    session.google_review_rating = req.rating
+    await session.save()
+
+    restaurant = await Restaurant.find_one(Restaurant.restaurant_id == session.restaurant_id)
+    now = utc_now()
+    if restaurant:
+        unpaid_orders = await Order.find(
+            Order.session_id == str(session.id),
+            Order.status != "paid",
+        ).to_list()
+        for ord_doc in unpaid_orders:
+            totals = compute_order_totals_paise(
+                ord_doc.items,
+                restaurant,
+                is_phone_verified=session.is_phone_verified,
+                dpdp_consent=session.dpdp_consent,
+                is_google_reviewed=True,
+            )
+            ord_doc.is_google_reviewed = True
+            ord_doc.subtotal_paise = totals["subtotal_paise"]
+            ord_doc.base_subtotal_paise = totals["base_subtotal_paise"]
+            ord_doc.phone_discount_paise = totals["phone_discount_paise"]
+            ord_doc.review_discount_paise = totals["review_discount_paise"]
+            ord_doc.discount_paise = totals["discount_paise"]
+            ord_doc.taxable_amount_paise = totals["taxable_amount_paise"]
+            ord_doc.tax_paise = totals["tax_paise"]
+            ord_doc.total_paise = totals["total_paise"]
+            ord_doc.updated_at = now
+            await ord_doc.save()
+            await ws_manager.broadcast(
+                session.restaurant_id, "ORDER_UPDATED", _serialize_order(ord_doc)
+            )
+
+    return {
+        "session_id": str(session.id),
+        "is_google_reviewed": True,
+        "google_review_rating": req.rating,
+        "google_review_discount_bps": getattr(restaurant, "google_review_discount_bps", 200),
+    }
 
 
 @router.post("/api/sessions/{session_id}/force-amber")
@@ -757,6 +1038,7 @@ async def mark_table_empty(
 async def get_menu(
     restaurant_id: str,
     qr_token: Optional[str] = Query(default=None),
+    claims: Optional[dict] = Depends(get_optional_claims),
 ) -> Dict[str, Any]:
     restaurant = await Restaurant.find_one(Restaurant.restaurant_id == restaurant_id)
     if not restaurant:
@@ -770,37 +1052,42 @@ async def get_menu(
         if not valid_table:
             raise HTTPException(status_code=403, detail="Invalid table qr_token")
 
+    is_super_admin = bool(claims and claims.get("role") == "super_admin")
     items = await MenuItem.find(MenuItem.restaurant_id == restaurant_id).to_list()
     menu_out = []
     for item in items:
         display_paise = compute_display_price_paise(item.base_price_paise, restaurant)
-        menu_out.append(
-            {
-                "id": str(item.id),
-                "restaurant_id": item.restaurant_id,
-                "name": item.name,
-                "name_hi": item.name_hi,
-                "category": item.category,
-                "description": item.description,
-                "ingredients": item.ingredients,
-                "display_price_paise": display_paise,
-                "base_price_paise": item.base_price_paise,
-                "prep_time_minutes": item.prep_time_minutes,
-                "is_veg": item.is_veg,
-                "spice_level": item.spice_level,
-                "calories": item.calories,
-                "image_url": item.image_url,
-                "model_3d_url": item.model_3d_url,
-                "upsell_tags": item.upsell_tags,
-                "is_bestseller": item.is_bestseller,
-                "is_available": item.is_available,
-                "total_orders_count": item.total_orders_count,
-            }
-        )
+        item_dict: Dict[str, Any] = {
+            "id": str(item.id),
+            "restaurant_id": item.restaurant_id,
+            "name": item.name,
+            "name_hi": item.name_hi,
+            "category": item.category,
+            "description": item.description,
+            "ingredients": item.ingredients,
+            "display_price_paise": display_paise,
+            "prep_time_minutes": item.prep_time_minutes,
+            "is_veg": item.is_veg,
+            "spice_level": item.spice_level,
+            "calories": item.calories,
+            "image_url": item.image_url,
+            "model_3d_url": item.model_3d_url,
+            "upsell_tags": item.upsell_tags,
+            "is_bestseller": item.is_bestseller,
+            "is_available": item.is_available,
+            "total_orders_count": item.total_orders_count,
+        }
+        # Only expose the raw base_price_paise vs display_price_paise difference to super_admin
+        # For owner/manager, show their entered base_price_paise without revealing platform markup
+        if is_super_admin or (claims and claims.get("role") in ("owner", "manager")):
+            item_dict["base_price_paise"] = item.base_price_paise
+        menu_out.append(item_dict)
 
     return {
         "restaurant_id": restaurant_id,
         "gst_bps": restaurant.gst_bps,
+        "phone_discount_bps": getattr(restaurant, "phone_discount_bps", 500),
+        "google_review_discount_bps": getattr(restaurant, "google_review_discount_bps", 200),
         "items": menu_out,
     }
 
@@ -848,18 +1135,19 @@ async def create_menu_item(
 
 @router.post("/api/orders/preview")
 async def preview_order_totals(req: OrderPreviewRequest) -> Dict[str, Any]:
-    """Server-side cart pricing preview in integer paise."""
     restaurant = await Restaurant.find_one(Restaurant.restaurant_id == req.restaurant_id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant not found")
 
     is_verified = False
     dpdp = False
+    is_reviewed = False
     if req.session_id:
         sess = await TableSession.get(req.session_id)
         if sess:
             is_verified = sess.is_phone_verified
             dpdp = sess.dpdp_consent
+            is_reviewed = getattr(sess, "is_google_reviewed", False)
 
     menu_docs = await MenuItem.find(MenuItem.restaurant_id == req.restaurant_id).to_list()
     menu_map = {str(m.id): m for m in menu_docs}
@@ -889,11 +1177,15 @@ async def preview_order_totals(req: OrderPreviewRequest) -> Dict[str, Any]:
         restaurant,
         is_phone_verified=is_verified,
         dpdp_consent=dpdp,
+        is_google_reviewed=is_reviewed,
     )
     return {
         "items": [li.model_dump() for li in line_items],
         "is_phone_verified": is_verified,
         "dpdp_consent": dpdp,
+        "is_google_reviewed": is_reviewed,
+        "phone_discount_bps": getattr(restaurant, "phone_discount_bps", 500),
+        "google_review_discount_bps": getattr(restaurant, "google_review_discount_bps", 200),
         "gst_bps": restaurant.gst_bps,
         **totals,
     }
@@ -910,6 +1202,7 @@ def _serialize_order(o: Order) -> Dict[str, Any]:
         "table_number": o.table_number,
         "customer_phone": o.customer_phone,
         "is_phone_verified": o.is_phone_verified,
+        "is_google_reviewed": getattr(o, "is_google_reviewed", False),
         "occasion": o.occasion,
         "items": [i.model_dump() for i in o.items],
         "status": o.status,
@@ -917,6 +1210,8 @@ def _serialize_order(o: Order) -> Dict[str, Any]:
         "manual_prep_override_minutes": o.manual_prep_override_minutes,
         "effective_prep_minutes": o.manual_prep_override_minutes or o.estimated_prep_minutes,
         "subtotal_paise": o.subtotal_paise,
+        "phone_discount_paise": getattr(o, "phone_discount_paise", o.discount_paise),
+        "review_discount_paise": getattr(o, "review_discount_paise", 0),
         "discount_paise": o.discount_paise,
         "taxable_amount_paise": o.taxable_amount_paise,
         "tax_paise": o.tax_paise,
@@ -962,7 +1257,6 @@ async def place_order(req: CreateOrderRequest) -> Dict[str, Any]:
     menu_docs = await MenuItem.find(MenuItem.restaurant_id == req.restaurant_id).to_list()
     menu_map = {str(m.id): m for m in menu_docs}
 
-    # Check if there is an existing unpaid order for this session to append to, or create new
     existing_order = await Order.find_one(
         Order.session_id == str(session.id),
         Order.status != "paid",
@@ -992,7 +1286,6 @@ async def place_order(req: CreateOrderRequest) -> Dict[str, Any]:
         m.total_orders_count += ci.qty
         await m.save()
 
-    # Crowd-aware prep time calculation based on active kitchen queue
     active_kitchen_count = await Order.find(
         Order.restaurant_id == req.restaurant_id,
         Order.status != "paid",
@@ -1002,6 +1295,7 @@ async def place_order(req: CreateOrderRequest) -> Dict[str, Any]:
     estimated_prep = max_dish_prep + crowd_buffer
 
     now = utc_now()
+    is_reviewed = getattr(session, "is_google_reviewed", False)
 
     if existing_order:
         combined_items = list(existing_order.items) + new_lines
@@ -1010,6 +1304,7 @@ async def place_order(req: CreateOrderRequest) -> Dict[str, Any]:
             restaurant,
             is_phone_verified=session.is_phone_verified,
             dpdp_consent=session.dpdp_consent,
+            is_google_reviewed=is_reviewed,
         )
         existing_order.items = combined_items
         existing_order.status = "queued"
@@ -1018,6 +1313,8 @@ async def place_order(req: CreateOrderRequest) -> Dict[str, Any]:
             existing_order.occasion = req.occasion
         existing_order.subtotal_paise = totals["subtotal_paise"]
         existing_order.base_subtotal_paise = totals["base_subtotal_paise"]
+        existing_order.phone_discount_paise = totals["phone_discount_paise"]
+        existing_order.review_discount_paise = totals["review_discount_paise"]
         existing_order.discount_paise = totals["discount_paise"]
         existing_order.taxable_amount_paise = totals["taxable_amount_paise"]
         existing_order.tax_paise = totals["tax_paise"]
@@ -1031,6 +1328,7 @@ async def place_order(req: CreateOrderRequest) -> Dict[str, Any]:
             restaurant,
             is_phone_verified=session.is_phone_verified,
             dpdp_consent=session.dpdp_consent,
+            is_google_reviewed=is_reviewed,
         )
         order_doc = Order(
             restaurant_id=req.restaurant_id,
@@ -1039,6 +1337,7 @@ async def place_order(req: CreateOrderRequest) -> Dict[str, Any]:
             customer_id=session.customer_id,
             customer_phone=session.customer_phone,
             is_phone_verified=session.is_phone_verified,
+            is_google_reviewed=is_reviewed,
             occasion=req.occasion or session.occasion,
             items=new_lines,
             status="queued",
@@ -1050,7 +1349,6 @@ async def place_order(req: CreateOrderRequest) -> Dict[str, Any]:
         )
         await order_doc.insert()
 
-    # Transition session: amber -> seated when first order is placed!
     was_amber = session.status == "amber"
     session.status = "seated"
     session.amber_alerted = False
@@ -1114,9 +1412,12 @@ async def repeat_order_item(order_id: str, req: RepeatItemRequest) -> Dict[str, 
         restaurant,
         is_phone_verified=session.is_phone_verified,
         dpdp_consent=session.dpdp_consent,
+        is_google_reviewed=getattr(session, "is_google_reviewed", False),
     )
     order_doc.subtotal_paise = totals["subtotal_paise"]
     order_doc.base_subtotal_paise = totals["base_subtotal_paise"]
+    order_doc.phone_discount_paise = totals["phone_discount_paise"]
+    order_doc.review_discount_paise = totals["review_discount_paise"]
     order_doc.discount_paise = totals["discount_paise"]
     order_doc.taxable_amount_paise = totals["taxable_amount_paise"]
     order_doc.tax_paise = totals["tax_paise"]
@@ -1147,7 +1448,9 @@ async def update_kitchen_order(
     if req.status is not None:
         order_doc.status = req.status
     if req.manual_prep_override_minutes is not None:
-        order_doc.manual_prep_override_minutes = max(1, min(90, req.manual_prep_override_minutes))
+        order_doc.manual_prep_override_minutes = max(
+            1, min(90, req.manual_prep_override_minutes)
+        )
     order_doc.updated_at = utc_now()
     await order_doc.save()
 
@@ -1184,7 +1487,6 @@ async def pay_and_close_order(order_id: str, req: PayOrderRequest) -> Dict[str, 
     order_doc.updated_at = now
     await order_doc.save()
 
-    # Compute server-side ledger split in integer paise
     split = compute_ledger_split_paise(
         subtotal_display_paise=order_doc.subtotal_paise,
         subtotal_base_paise=order_doc.base_subtotal_paise,
@@ -1207,7 +1509,6 @@ async def pay_and_close_order(order_id: str, req: PayOrderRequest) -> Dict[str, 
     )
     await ledger_entry.insert()
 
-    # Update customer total spent & favorites if verified
     if order_doc.customer_phone:
         cust = await Customer.find_one(
             Customer.restaurant_id == order_doc.restaurant_id,
@@ -1222,7 +1523,6 @@ async def pay_and_close_order(order_id: str, req: PayOrderRequest) -> Dict[str, 
             cust.last_visit_at = now
             await cust.save()
 
-    # Close session & return table to empty (Red)
     if session:
         session.status = "empty"
         session.closed_at = now
@@ -1255,6 +1555,8 @@ async def pay_and_close_order(order_id: str, req: PayOrderRequest) -> Dict[str, 
             "table_number": order_doc.table_number,
             "customer_phone": order_doc.customer_phone or "Guest Diner",
             "subtotal_paise": order_doc.subtotal_paise,
+            "phone_discount_paise": getattr(order_doc, "phone_discount_paise", 0),
+            "review_discount_paise": getattr(order_doc, "review_discount_paise", 0),
             "discount_paise": order_doc.discount_paise,
             "tax_paise": order_doc.tax_paise,
             "total_paise": order_doc.total_paise,
@@ -1337,7 +1639,9 @@ async def create_service_request(req: CreateServiceRequestInput) -> Dict[str, An
 async def update_service_request(
     req_id: str,
     req: UpdateServiceRequestInput,
-    claims: dict = Depends(require_roles(["super_admin", "owner", "manager", "kitchen", "waiter"])),
+    claims: dict = Depends(
+        require_roles(["super_admin", "owner", "manager", "kitchen", "waiter"])
+    ),
 ) -> Dict[str, Any]:
     sr = await ServiceRequest.get(req_id)
     if not sr:
@@ -1356,7 +1660,7 @@ async def update_service_request(
     return payload
 
 
-# --- AI Endpoints (Claude API + Deterministic Fallback) ---
+# --- AI Endpoints & ElevenLabs Bilingual Voice Guide Bot ---
 
 
 @router.post("/api/ai/parse-order")
@@ -1379,6 +1683,60 @@ async def ai_upsell_suggestions(req: AIUpsellRequest) -> Dict[str, Any]:
     )
 
 
+@router.post("/api/voice/tts")
+async def generate_voice_guide_tts(req: VoiceTTSRequest) -> Response:
+    """
+    Generates natural Hindi & English speech using ElevenLabs API (eleven_multilingual_v2)
+    with the configured Voice ID (RABOvaPec1ymXz02oDQi).
+    """
+    text_clean = req.text.strip()
+    if not text_clean:
+        raise HTTPException(status_code=400, detail="Empty text")
+
+    cache_key = hashlib.sha256(
+        f"{settings.ELEVENLABS_VOICE_ID}:{req.lang}:{text_clean}".encode("utf-8")
+    ).hexdigest()
+
+    if cache_key in TTS_AUDIO_CACHE:
+        return Response(content=TTS_AUDIO_CACHE[cache_key], media_type="audio/mpeg")
+
+    if not settings.ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=503, detail="ElevenLabs API key not configured")
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{settings.ELEVENLABS_VOICE_ID}"
+    headers = {
+        "xi-api-key": settings.ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+    payload = {
+        "text": text_clean,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.55,
+            "similarity_boost": 0.80,
+            "style": 0.25,
+            "use_speaker_boost": True,
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(url, headers=headers, json=payload)
+        if r.status_code == 402:
+            # Free-tier ElevenLabs keys cannot use Community Library voices via API;
+            # automatically fall back to ElevenLabs official premade multilingual voice
+            fallback_url = "https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb"
+            r = await client.post(fallback_url, headers=headers, json=payload)
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"ElevenLabs TTS returned {r.status_code}",
+            )
+        audio_bytes = r.content
+        TTS_AUDIO_CACHE[cache_key] = audio_bytes
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+
+
 # --- Owner Analytics & Read-Only Settlement Report ---
 
 
@@ -1393,37 +1751,40 @@ async def get_owner_analytics(
 
     menu_items = await MenuItem.find(MenuItem.restaurant_id == restaurant_id).to_list()
     orders = await Order.find(Order.restaurant_id == restaurant_id).to_list()
-    customers = await Customer.find(Customer.restaurant_id == restaurant_id).sort("-last_visit_at").to_list()
+    customers = (
+        await Customer.find(Customer.restaurant_id == restaurant_id)
+        .sort("-last_visit_at")
+        .to_list()
+    )
 
-    has_sample_data = any(o.is_sample_data for o in orders) or any(c.is_sample_data for c in customers)
+    has_sample_data = any(o.is_sample_data for o in orders) or any(
+        c.is_sample_data for c in customers
+    )
 
-    # 1. Best sellers
     best_sellers = sorted(menu_items, key=lambda m: m.total_orders_count, reverse=True)[:6]
     best_sellers_data = [
         {
             "name": m.name.replace(" (3D View)", ""),
             "orders": m.total_orders_count,
-            "revenue_paise": m.total_orders_count * compute_display_price_paise(m.base_price_paise, restaurant),
+            "revenue_paise": m.total_orders_count * m.base_price_paise,
             "is_sample_data": True,
         }
         for m in best_sellers
     ]
 
-    # 2. Peak hours distribution
     hour_buckets: Dict[str, Dict[str, int]] = {
-        "12 PM": {"orders": 6, "revenue_paise": 385000},
-        "1 PM": {"orders": 11, "revenue_paise": 720000},
-        "2 PM": {"orders": 9, "revenue_paise": 590000},
-        "5 PM": {"orders": 7, "revenue_paise": 310000},
-        "7 PM": {"orders": 14, "revenue_paise": 940000},
-        "8 PM": {"orders": 19, "revenue_paise": 1380000},
-        "9 PM": {"orders": 16, "revenue_paise": 1120000},
-        "10 PM": {"orders": 8, "revenue_paise": 540000},
+        "Mon": {"orders": 14, "revenue_paise": 685000},
+        "Tue": {"orders": 19, "revenue_paise": 920000},
+        "Wed": {"orders": 28, "revenue_paise": 1490000},
+        "Thu": {"orders": 12, "revenue_paise": 510000},
+        "Fri": {"orders": 22, "revenue_paise": 1140000},
+        "Sat": {"orders": 31, "revenue_paise": 1680000},
+        "Sun": {"orders": 26, "revenue_paise": 1320000},
     }
     for o in orders:
         if not o.is_sample_data:
-            hr_label = o.created_at.strftime("%I %p").lstrip("0")
-            bucket = hour_buckets.setdefault(hr_label, {"orders": 0, "revenue_paise": 0})
+            day_label = o.created_at.strftime("%a")
+            bucket = hour_buckets.setdefault(day_label, {"orders": 0, "revenue_paise": 0})
             bucket["orders"] += 1
             bucket["revenue_paise"] += o.total_paise
 
@@ -1432,7 +1793,6 @@ async def get_owner_analytics(
         for k, v in hour_buckets.items()
     ]
 
-    # 3. Retained customers
     retained_customers = [
         {
             "id": str(c.id),
@@ -1471,52 +1831,66 @@ async def get_owner_settlement_report(
     restaurant_id: str,
     claims: dict = Depends(require_roles(["super_admin", "owner"])),
 ) -> Dict[str, Any]:
-    """Read-only settlement report for the owner (and super_admin) role."""
+    """
+    Read-only settlement report for the owner role.
+    Note: Platform hidden markup is NEVER exposed to the owner role — only super_admin sees platform cut.
+    """
     if claims.get("role") == "owner" and claims.get("restaurant_id") != restaurant_id:
-        raise HTTPException(status_code=403, detail="Access denied to another restaurant's settlement report")
+        raise HTTPException(
+            status_code=403, detail="Access denied to another restaurant's settlement report"
+        )
 
     restaurant = await Restaurant.find_one(Restaurant.restaurant_id == restaurant_id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant not found")
 
-    entries = await LedgerEntry.find(LedgerEntry.restaurant_id == restaurant_id).sort("-created_at").to_list()
+    is_super_admin = claims.get("role") == "super_admin"
+    entries = (
+        await LedgerEntry.find(LedgerEntry.restaurant_id == restaurant_id)
+        .sort("-created_at")
+        .to_list()
+    )
 
-    total_gross_paise = sum(e.gross_bill_paise for e in entries)
     total_discount_paise = sum(e.customer_discount_paise for e in entries)
     total_tax_paise = sum(e.tax_paise for e in entries)
     total_restaurant_net_paise = sum(e.restaurant_net_paise for e in entries)
-    total_platform_markup_paise = sum(e.platform_hidden_markup_paise for e in entries)
 
     return {
         "restaurant_id": restaurant_id,
         "restaurant_name": restaurant.name,
-        "billing_model": restaurant.billing_model,
         "read_only": True,
         "has_sample_data": any(e.is_sample_data for e in entries),
         "summary_paise": {
-            "total_gross_paise": total_gross_paise,
+            "total_gross_paise": (
+                sum(e.gross_bill_paise for e in entries)
+                if is_super_admin
+                else sum(e.subtotal_base_paise for e in entries)
+            ),
             "total_discount_paise": total_discount_paise,
             "total_tax_paise": total_tax_paise,
             "total_restaurant_net_paise": total_restaurant_net_paise,
-            "total_platform_markup_paise": total_platform_markup_paise,
         },
         "entries": [
             {
                 "id": str(e.id),
                 "order_id": e.order_id,
                 "table_number": e.table_number,
-                "billing_model": e.billing_model,
-                "gross_bill_paise": e.gross_bill_paise,
-                "subtotal_display_paise": e.subtotal_display_paise,
                 "subtotal_base_paise": e.subtotal_base_paise,
                 "customer_discount_paise": e.customer_discount_paise,
                 "tax_paise": e.tax_paise,
                 "restaurant_net_paise": e.restaurant_net_paise,
-                "platform_hidden_markup_paise": e.platform_hidden_markup_paise,
                 "payment_method": e.payment_method,
                 "settled": e.settled,
                 "is_sample_data": e.is_sample_data,
                 "created_at": e.created_at.isoformat(),
+                **(
+                    {
+                        "gross_bill_paise": e.gross_bill_paise,
+                        "platform_hidden_markup_paise": e.platform_hidden_markup_paise,
+                    }
+                    if is_super_admin
+                    else {}
+                ),
             }
             for e in entries
         ],
@@ -1544,13 +1918,17 @@ async def get_super_admin_overview(
                 "orders_settled_count": len(r_entries),
                 "gross_gmv_paise": sum(e.gross_bill_paise for e in r_entries),
                 "restaurant_net_paise": sum(e.restaurant_net_paise for e in r_entries),
-                "platform_hidden_markup_paise": sum(e.platform_hidden_markup_paise for e in r_entries),
+                "platform_hidden_markup_paise": sum(
+                    e.platform_hidden_markup_paise for e in r_entries
+                ),
             }
         )
 
     return {
         "total_gmv_paise": sum(e.gross_bill_paise for e in entries),
-        "total_platform_markup_paise": sum(e.platform_hidden_markup_paise for e in entries),
+        "total_platform_markup_paise": sum(
+            e.platform_hidden_markup_paise for e in entries
+        ),
         "total_one_time_fees_paise": sum(
             r.one_time_fee_paise for r in restaurants if r.billing_model == "one_time_amc"
         ),
@@ -1581,7 +1959,7 @@ async def get_super_admin_overview(
     }
 
 
-# --- Authenticated WebSocket Endpoint (One Channel Per restaurant_id) ---
+# --- Authenticated WebSocket Endpoint ---
 
 
 @router.websocket("/ws/{restaurant_id}")

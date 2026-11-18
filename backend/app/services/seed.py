@@ -163,42 +163,46 @@ async def seed_initial_data() -> None:
     ]
     await User.insert_many(users)
 
-    # 3. Create Tables for Both Tenants
+    # 3. Create Tables for Both Tenants (with 2D Floor Map coordinates x_pct, y_pct)
     dhaba_zones = [
-        ("AC Family Hall", 4),
-        ("AC Family Hall", 4),
-        ("AC Family Hall", 6),
-        ("Charpai Courtyard", 4),
-        ("Charpai Courtyard", 6),
-        ("VIP Highway Cabin", 8),
-        ("AC Family Hall", 2),
-        ("Charpai Courtyard", 4),
+        ("AC Family Hall", 4, 18, 28),
+        ("AC Family Hall", 4, 38, 28),
+        ("AC Family Hall", 6, 58, 28),
+        ("Charpai Courtyard", 4, 18, 56),
+        ("Charpai Courtyard", 6, 38, 56),
+        ("VIP Highway Cabin", 8, 58, 56),
+        ("AC Family Hall", 2, 38, 80),
+        ("Charpai Courtyard", 4, 58, 80),
     ]
-    for idx, (zone, cap) in enumerate(dhaba_zones, start=1):
+    for idx, (zone, cap, x_p, y_p) in enumerate(dhaba_zones, start=1):
         await Table(
             restaurant_id="shree-ram-dhaba",
             table_number=idx,
             label=f"Table {idx}",
             capacity=cap,
             zone=zone,
+            x_pct=x_p,
+            y_pct=y_p,
             qr_token=f"srd-table-{idx}-token",
         ).insert()
 
     lumina_zones = [
-        ("Glasshouse Sunroom", 2),
-        ("Glasshouse Sunroom", 4),
-        ("Roastery Counter", 2),
-        ("Roastery Counter", 4),
-        ("Reading Deck", 4),
-        ("Reading Deck", 6),
+        ("Glasshouse Sunroom", 2, 20, 30),
+        ("Glasshouse Sunroom", 4, 45, 30),
+        ("Roastery Counter", 2, 70, 30),
+        ("Roastery Counter", 4, 20, 62),
+        ("Reading Deck", 4, 45, 62),
+        ("Reading Deck", 6, 70, 62),
     ]
-    for idx, (zone, cap) in enumerate(lumina_zones, start=1):
+    for idx, (zone, cap, x_p, y_p) in enumerate(lumina_zones, start=1):
         await Table(
             restaurant_id="lumina-artisan-cafe",
             table_number=idx,
             label=f"Table {idx}",
             capacity=cap,
             zone=zone,
+            x_pct=x_p,
+            y_pct=y_p,
             qr_token=f"lum-table-{idx}-token",
         ).insert()
 
