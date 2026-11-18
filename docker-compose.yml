@@ -1,0 +1,31 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: retai-app
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/retai_hospitality?retryWrites=true&w=majority
+      - DATABASE_NAME=retai_hospitality
+      - JWT_SECRET=retai-prod-super-secret-jwt-key-2026-secure
+      - DEMO_MODE=true
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ELEVENLABS_VOICE_ID=RABOvaPec1ymXz02oDQi
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:7.0
+    container_name: retai-mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:

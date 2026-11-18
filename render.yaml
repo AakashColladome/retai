@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: retai-hospitality-os
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+        # Enter your free MongoDB Atlas connection string:
+        # mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/retai_hospitality?retryWrites=true&w=majority
+      - key: DATABASE_NAME
+        value: retai_hospitality
+      - key: DEMO_MODE
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        value: RABOvaPec1ymXz02oDQi
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-haiku-5-5
+      - key: ANTHROPIC_UPSELL_MODEL
+        value: claude-sonnet-5-5

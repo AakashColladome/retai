@@ -102,3 +102,35 @@ async def health_check():
         "anthropic_model": settings.ANTHROPIC_MODEL,
         "anthropic_upsell_model": settings.ANTHROPIC_UPSELL_MODEL,
     }
+
+
+# Static file serving and SPA fallback for production single-service deployment
+import os
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+FRONTEND_DIST = os.path.abspath(
+    os.getenv(
+        "FRONTEND_DIST_PATH",
+        os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"),
+    )
+)
+
+if os.path.exists(FRONTEND_DIST):
+    for sub in ["assets", "images", "models"]:
+        sub_dir = os.path.join(FRONTEND_DIST, sub)
+        if os.path.exists(sub_dir):
+            app.mount(f"/{sub}", StaticFiles(directory=sub_dir), name=f"static_{sub}")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_frontend(full_path: str):
+        if full_path.startswith("api") or full_path.startswith("ws") or full_path == "health":
+            raise HTTPException(status_code=404, detail="Endpoint not found")
+        target_file = os.path.join(FRONTEND_DIST, full_path)
+        if full_path and os.path.exists(target_file) and os.path.isfile(target_file):
+            return FileResponse(target_file)
+        index_file = os.path.join(FRONTEND_DIST, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend index.html not found")
