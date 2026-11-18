@@ -67,7 +67,17 @@ async def amber_occupancy_watcher() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    client = AsyncIOMotorClient(settings.MONGODB_URI)
+    # Enable robust TLS CA certificate verification for cloud & container environments
+    client_kwargs = {}
+    try:
+        import certifi
+        ca_file = certifi.where()
+        if ca_file and ("mongodb+srv://" in settings.MONGODB_URI or "tls=true" in settings.MONGODB_URI.lower() or "ssl=true" in settings.MONGODB_URI.lower()):
+            client_kwargs["tlsCAFile"] = ca_file
+    except Exception as e:
+        print(f"[Lifespan] certifi load warning: {e}")
+
+    client = AsyncIOMotorClient(settings.MONGODB_URI, **client_kwargs)
     db = client[settings.DATABASE_NAME]
     await init_beanie(database=db, document_models=ALL_DOCUMENT_MODELS)
     await seed_initial_data()
