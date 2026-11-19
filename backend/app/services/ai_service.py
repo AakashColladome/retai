@@ -1,6 +1,7 @@
 import json
 import re
 from typing import Any, Dict, List, Optional
+import httpx
 from anthropic import AsyncAnthropic
 
 from app.core.config import settings
@@ -132,18 +133,13 @@ def _rule_based_parse_order(
     }
 
 
-async def parse_multilingual_order(
+async def _gemini_smart_order(
     restaurant: Restaurant,
     menu_items: List[MenuItem],
     text: str,
-) -> Dict[str, Any]:
-    """
-    Uses Claude API (env ANTHROPIC_MODEL, default claude-haiku-5-5) on the server to parse
-    Hindi/English/Hinglish voice or text orders into structured cart items.
-    Falls back to deterministic parser if ANTHROPIC_API_KEY is not set or API fails.
-    """
-    if not settings.ANTHROPIC_API_KEY.strip():
-        return _rule_based_parse_order(restaurant, menu_items, text)
+) -> Optional[Dict[str, Any]]:
+    if not settings.GEMINI_API_KEY.strip():
+        return None
 
     catalog = [
         {
@@ -151,65 +147,181 @@ async def parse_multilingual_order(
             "name": item.name,
             "aliases": item.name_hi,
             "category": item.category,
+            "price_rupees": round(item.base_price_paise / 100),
+            "description": item.description,
         }
         for item in menu_items
         if item.is_available
     ]
 
-    prompt = (
-        "You are an AI restaurant order parser supporting English, Hindi, and Hinglish.\n"
-        f"Menu Catalog JSON:\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
-        f"Customer Request: {text}\n\n"
-        "Return ONLY valid JSON with format:\n"
-        '{"items": [{"menu_item_id": "<id>", "qty": <int>, "notes": "<customization>"}], "summary_message": "<short confirmation>"}'
-    )
+    prompt = f"""
+You are the polite, intelligent AI Smart Waiter at {restaurant.name} ({restaurant.tagline}).
+Current Menu Items Catalog:
+{json.dumps(catalog, ensure_ascii=False)}
+
+Customer said: "{text}"
+
+Instructions:
+1. Understand English, Hindi, and Hinglish.
+2. If the customer greets you (e.g. "hello", "hi", "namaste", "hey"), respond warmly in polite Hindi/Hinglish welcoming them to {restaurant.name}, recommend 2 signature items (e.g. Dal Makhani, Maharaja Thali, or Paneer Tikka), and ask what they would like to eat. Leave "items" as an empty list [].
+3. If the customer asks what to eat or for recommendations (e.g. "kya milega", "kuch meetha batao", "spicy kya hai"): recommend relevant dishes from the catalog. Leave "items" empty unless they explicitly say to add or order them.
+4. If the customer wants to order or add dishes (e.g. "2 dal makhani aur 4 butter naan", "ek lassi add karo", "paneer butter masala"):
+   - Match each dish to the exact "id" from the catalog.
+   - Extract the quantity (default to 1 if not stated).
+   - Extract any customization notes (e.g. "less spicy", "extra butter", "kam teekha").
+   - Populate the "items" list.
+   - In "reply_message", give a warm, courteous Hindi/Hinglish confirmation stating what was added to the cart and asking if they want bread, beverages, or dessert.
+
+Return ONLY valid JSON matching this schema:
+{{
+  "intent": "greeting" | "recommendation" | "order" | "general",
+  "reply_message": "<warm conversational Hindi/Hinglish reply>",
+  "items": [
+    {{"menu_item_id": "<exact id from catalog>", "qty": <int>, "notes": "<notes or empty string>"}}
+  ]
+}}
+"""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }
 
     try:
-        client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=500,
-            temperature=0.1,
-            messages=[{"role": "user", "content": prompt}],
+        async with httpx.AsyncClient(timeout=14.0) as client:
+            res = await client.post(url, json=payload)
+            if res.status_code != 200:
+                print(f"[GeminiSmartOrder] API returned HTTP {res.status_code}: {res.text}")
+                return None
+            data = res.json()
+            raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            parsed = json.loads(raw_text)
+
+            item_map = {str(m.id): m for m in menu_items}
+            enriched: List[Dict[str, Any]] = []
+            for entry in parsed.get("items", []):
+                m_item = item_map.get(str(entry.get("menu_item_id")))
+                if not m_item:
+                    continue
+                qty = max(1, min(20, int(entry.get("qty", 1))))
+                display_paise = compute_display_price_paise(m_item.base_price_paise, restaurant)
+                enriched.append(
+                    {
+                        "menu_item_id": str(m_item.id),
+                        "name": m_item.name,
+                        "qty": qty,
+                        "display_unit_paise": display_paise,
+                        "line_display_total_paise": qty * display_paise,
+                        "notes": str(entry.get("notes", "")),
+                        "category": m_item.category,
+                        "image_url": m_item.image_url,
+                    }
+                )
+
+            reply_msg = parsed.get("reply_message")
+            if not reply_msg:
+                if enriched:
+                    reply_msg = f"Maine {len(enriched)} dish(es) cart me add kar diye hain!"
+                else:
+                    reply_msg = "Namaskar ji! Shree Ram Dhaba mein aapka swagat hai. Aaj aap kya lena pasand karenge?"
+
+            return {
+                "source": "gemini_2.5_flash",
+                "model": settings.GEMINI_MODEL,
+                "parsed_items": enriched,
+                "summary_message": reply_msg,
+                "intent": parsed.get("intent", "general"),
+            }
+    except Exception as exc:
+        print(f"[GeminiSmartOrder] Exception: {exc}")
+        return None
+
+
+async def parse_multilingual_order(
+    restaurant: Restaurant,
+    menu_items: List[MenuItem],
+    text: str,
+) -> Dict[str, Any]:
+    """
+    Intelligent Conversational Waiter:
+    1. First tries Google Gemini 2.5 Flash for conversational Hindi/English order parsing & hospitality dialogue.
+    2. Falls back to Anthropic Claude if configured.
+    3. Falls back to rule-based parser.
+    """
+    # 1. Try Google Gemini 2.5 Flash (user provided API key)
+    gemini_result = await _gemini_smart_order(restaurant, menu_items, text)
+    if gemini_result:
+        return gemini_result
+
+    # 2. Try Anthropic Claude
+    if settings.ANTHROPIC_API_KEY.strip():
+        catalog = [
+            {
+                "id": str(item.id),
+                "name": item.name,
+                "aliases": item.name_hi,
+                "category": item.category,
+            }
+            for item in menu_items
+            if item.is_available
+        ]
+
+        prompt = (
+            "You are an AI restaurant order parser supporting English, Hindi, and Hinglish.\n"
+            f"Menu Catalog JSON:\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
+            f"Customer Request: {text}\n\n"
+            "Return ONLY valid JSON with format:\n"
+            '{"items": [{"menu_item_id": "<id>", "qty": <int>, "notes": "<customization>"}], "summary_message": "<short confirmation>"}'
         )
-        raw_content = response.content[0].text.strip()
-        json_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
-        parsed_json = json.loads(json_match.group(0) if json_match else raw_content)
 
-        item_map = {str(m.id): m for m in menu_items}
-        enriched: List[Dict[str, Any]] = []
-        for entry in parsed_json.get("items", []):
-            m_item = item_map.get(str(entry.get("menu_item_id")))
-            if not m_item:
-                continue
-            qty = max(1, min(20, int(entry.get("qty", 1))))
-            display_paise = compute_display_price_paise(m_item.base_price_paise, restaurant)
-            enriched.append(
-                {
-                    "menu_item_id": str(m_item.id),
-                    "name": m_item.name,
-                    "qty": qty,
-                    "display_unit_paise": display_paise,
-                    "line_display_total_paise": qty * display_paise,
-                    "notes": str(entry.get("notes", "")),
-                    "category": m_item.category,
-                    "image_url": m_item.image_url,
-                }
+        try:
+            client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            response = await client.messages.create(
+                model=settings.ANTHROPIC_MODEL,
+                max_tokens=500,
+                temperature=0.1,
+                messages=[{"role": "user", "content": prompt}],
             )
+            raw_content = response.content[0].text.strip()
+            json_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+            parsed_json = json.loads(json_match.group(0) if json_match else raw_content)
 
-        if not enriched:
-            return _rule_based_parse_order(restaurant, menu_items, text)
+            item_map = {str(m.id): m for m in menu_items}
+            enriched: List[Dict[str, Any]] = []
+            for entry in parsed_json.get("items", []):
+                m_item = item_map.get(str(entry.get("menu_item_id")))
+                if not m_item:
+                    continue
+                qty = max(1, min(20, int(entry.get("qty", 1))))
+                display_paise = compute_display_price_paise(m_item.base_price_paise, restaurant)
+                enriched.append(
+                    {
+                        "menu_item_id": str(m_item.id),
+                        "name": m_item.name,
+                        "qty": qty,
+                        "display_unit_paise": display_paise,
+                        "line_display_total_paise": qty * display_paise,
+                        "notes": str(entry.get("notes", "")),
+                        "category": m_item.category,
+                        "image_url": m_item.image_url,
+                    }
+                )
 
-        return {
-            "source": "claude_api",
-            "model": settings.ANTHROPIC_MODEL,
-            "parsed_items": enriched,
-            "summary_message": parsed_json.get(
-                "summary_message", f"Added {len(enriched)} item(s) via AI Concierge."
-            ),
-        }
-    except Exception:
-        return _rule_based_parse_order(restaurant, menu_items, text)
+            if enriched:
+                return {
+                    "source": "claude_api",
+                    "model": settings.ANTHROPIC_MODEL,
+                    "parsed_items": enriched,
+                    "summary_message": parsed_json.get(
+                        "summary_message", f"Added {len(enriched)} item(s) via AI Concierge."
+                    ),
+                }
+        except Exception as e:
+            print(f"[ClaudeParse] Exception: {e}")
+
+    # 3. Rule-based fallback
+    return _rule_based_parse_order(restaurant, menu_items, text)
 
 
 def _rule_based_upsell(

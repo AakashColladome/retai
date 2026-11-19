@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     ANTHROPIC_MODEL: str = "claude-haiku-5-5"
     ANTHROPIC_UPSELL_MODEL: str = "claude-sonnet-5-5"
 
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+
     ELEVENLABS_API_KEY: str = ""
     ELEVENLABS_VOICE_ID: str = "RABOvaPec1ymXz02oDQi"
 

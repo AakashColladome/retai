@@ -729,6 +729,30 @@ async def get_tables_status(restaurant_id: str) -> List[Dict[str, Any]]:
     return result
 
 
+@router.get("/api/customers/lookup")
+async def lookup_customer(
+    phone: str = Query(..., description="10-digit mobile number"),
+    restaurant_id: str = Query(..., description="Restaurant ID"),
+) -> Dict[str, Any]:
+    cleaned = "".join(filter(str.isdigit, phone))[-10:]
+    if len(cleaned) < 10:
+        return {"found": False, "cleaned_phone": cleaned}
+
+    customer = await Customer.find_one(
+        Customer.restaurant_id == restaurant_id,
+        Customer.phone == cleaned,
+    )
+    if customer:
+        return {
+            "found": True,
+            "name": customer.name or "VIP Guest",
+            "phone": customer.phone,
+            "visit_count": customer.visit_count,
+            "last_occasion": customer.last_occasion,
+        }
+    return {"found": False, "cleaned_phone": cleaned}
+
+
 @router.post("/api/sessions/start")
 async def start_table_session(req: StartSessionRequest) -> Dict[str, Any]:
     table = await Table.find_one(
@@ -1664,6 +1688,7 @@ async def update_service_request(
 
 
 @router.post("/api/ai/parse-order")
+@router.post("/api/ai/smart-order")
 async def ai_parse_order(req: AIParseRequest) -> Dict[str, Any]:
     restaurant = await Restaurant.find_one(Restaurant.restaurant_id == req.restaurant_id)
     if not restaurant:
