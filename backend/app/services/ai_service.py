@@ -231,6 +231,7 @@ Return ONLY valid JSON matching this schema:
                 "model": settings.GEMINI_MODEL,
                 "parsed_items": enriched,
                 "summary_message": reply_msg,
+                "reply_message": reply_msg,
                 "intent": parsed.get("intent", "general"),
             }
     except Exception as exc:
